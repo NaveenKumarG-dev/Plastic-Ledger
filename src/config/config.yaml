@@ -1,5 +1,5 @@
 model:
-  checkpoint: d:/Plastic-Ledger/U-net-models/runs/marida_v1/best_model.pth
+  checkpoint: d:/Plastic-Ledger/models/unet/runs/marida_v1/best_model.pth
   architecture: unet_smp       # segmentation_models_pytorch U-Net checkpoint
   num_bands: 11
   num_classes: 15

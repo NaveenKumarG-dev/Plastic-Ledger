@@ -34,7 +34,7 @@ logger = get_logger(__name__)
 # ── RF Polymer Model ─────────────────────────────────────────────
 # Default location for the trained Random Forest model, label map,
 # and feature list produced by MARIDA_h5_dataset_signatures/train_polymer_model.py
-_DEFAULT_RF_MODEL_DIR = Path(r"d:\Plastic-Ledger\MARIDA_h5_dataset_signatures")
+_DEFAULT_RF_MODEL_DIR = Path(r"d:\Plastic-Ledger\models\polymer")
 RF_MODEL_PATH   = _DEFAULT_RF_MODEL_DIR / "polymer_rf_model.pkl"
 RF_LABEL_PATH   = _DEFAULT_RF_MODEL_DIR / "polymer_label_map.json"
 RF_FEATURE_PATH = _DEFAULT_RF_MODEL_DIR / "polymer_feature_names.json"

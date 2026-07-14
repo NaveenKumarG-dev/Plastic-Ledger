@@ -1,3 +1,6 @@
+# PyTorch CUDA wheels
+--extra-index-url https://download.pytorch.org/whl/cu128
+
 # Core
 numpy>=1.24
 pandas>=2.0
@@ -19,11 +22,13 @@ sentinelhub>=3.9
 copernicusmarine>=1.0
 cdsapi>=0.6
 
-# Deep learning
-torch>=2.0
+# Deep Learning (CUDA 12.8)
+torch
+torchvision
+torchaudio
 segmentation-models-pytorch>=0.3
 
-# Visualization & reporting
+# Visualization & Reporting
 matplotlib>=3.7
 fpdf2>=2.7
 rich>=13.0
