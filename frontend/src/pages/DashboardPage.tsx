@@ -27,7 +27,7 @@ const DashboardPage: React.FC = () => {
   // Timeline drift state
   const [driftDays, setDriftDays] = useState(0);
 
-  // Callback when a region is drawn or selected on map
+  // Callback when a region is drawn or manually edited
   const handleRegionSelected = useCallback(
     (coords: Array<[number, number]>, stats: RegionCalculationResult) => {
       const region: SelectedRegion = {
@@ -100,7 +100,7 @@ const DashboardPage: React.FC = () => {
         {/* Floating Left GIS Toolbar */}
         <FloatingGISToolbar onReset={handleResetSelection} />
 
-        {/* Top-Right Hamburger Symbol Slide-Over GIS Drawer (Region info, metrics, layers) */}
+        {/* Top-Right Hamburger Symbol Slide-Over GIS Drawer with Manual Entry Mode */}
         <GISPanelDrawer
           region={currentRegion}
           stats={currentStats}
@@ -108,6 +108,7 @@ const DashboardPage: React.FC = () => {
           summary={summary}
           onAnalyze={handleStartAnalysis}
           isAnalyzing={isAnalyzing}
+          onRegionChange={handleRegionSelected}
         />
 
         {/* Clickable Cluster Inspection Detail Panel */}
