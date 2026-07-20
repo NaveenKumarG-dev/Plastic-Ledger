@@ -29,7 +29,7 @@ const DashboardPage: React.FC = () => {
   // Timeline drift state
   const [driftDays, setDriftDays] = useState(0);
 
-  // Callback when a region is drawn on map
+  // Callback when a region is drawn or selected on map
   const handleRegionSelected = useCallback(
     (coords: Array<[number, number]>, stats: RegionCalculationResult) => {
       const region: SelectedRegion = {
@@ -93,34 +93,39 @@ const DashboardPage: React.FC = () => {
         {/* Leaflet Satellite Map & Layers */}
         <ProfessionalGISMap
           clusters={clusters}
+          currentRegion={currentRegion}
           onClusterClick={(c) => setSelectedCluster(c)}
           onRegionSelected={handleRegionSelected}
           driftDays={driftDays}
         />
 
-        {/* Floating Left GIS Toolbar */}
+        {/* Floating Left GIS Toolbar (Always accessible to select regions) */}
         <FloatingGISToolbar onReset={handleResetSelection} />
 
-        {/* Top-Right Mini Stats & Layer Control */}
-        <TopStatsHeader
-          clusterCount={clusters.length || 47}
-          accuracy={96}
-          processingTime={3.2}
-          highRiskCount={clusters.filter((c) => c.riskLevel === 'high' || c.riskLevel === 'critical').length || 12}
-          estimatedWaste={
-            clusters.length > 0
-              ? Number(clusters.reduce((acc, c) => acc + c.estimatedQuantity, 0).toFixed(2))
-              : 2.4
-          }
-        />
+        {/* Top-Right Mini Stats & Layer Control (Only visible AFTER region is selected) */}
+        {currentRegion && (
+          <TopStatsHeader
+            clusterCount={clusters.length || 47}
+            accuracy={96}
+            processingTime={3.2}
+            highRiskCount={clusters.filter((c) => c.riskLevel === 'high' || c.riskLevel === 'critical').length || 12}
+            estimatedWaste={
+              clusters.length > 0
+                ? Number(clusters.reduce((acc, c) => acc + c.estimatedQuantity, 0).toFixed(2))
+                : 2.4
+            }
+          />
+        )}
 
-        {/* Selected Region Info Card (Top-Left, beside Toolbar) */}
-        <RegionInfoCard
-          region={currentRegion}
-          stats={currentStats}
-          onAnalyze={handleStartAnalysis}
-          isAnalyzing={isAnalyzing}
-        />
+        {/* Selected Region Info Card (Only visible AFTER region is selected) */}
+        {currentRegion && (
+          <RegionInfoCard
+            region={currentRegion}
+            stats={currentStats}
+            onAnalyze={handleStartAnalysis}
+            isAnalyzing={isAnalyzing}
+          />
+        )}
 
         {/* Clickable Cluster Inspection Detail Panel (Right Side) */}
         <ClusterDetailPanel
@@ -135,11 +140,13 @@ const DashboardPage: React.FC = () => {
           </div>
         )}
 
-        {/* Bottom Interactive Timeline Slider (Centered) */}
-        <TimelineSlider
-          selectedDays={driftDays}
-          onTimeChange={(days) => setDriftDays(days)}
-        />
+        {/* Bottom Interactive Timeline Slider (Only visible AFTER region is selected) */}
+        {currentRegion && (
+          <TimelineSlider
+            selectedDays={driftDays}
+            onTimeChange={(days) => setDriftDays(days)}
+          />
+        )}
 
         {/* 6-Step AI Processing Animation Modal */}
         <AIProcessingModal

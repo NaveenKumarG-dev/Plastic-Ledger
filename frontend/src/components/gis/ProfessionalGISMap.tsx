@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useDashboard } from '@/context/DashboardContext';
-import { PlasticCluster } from '@/types';
+import { PlasticCluster, SelectedRegion } from '@/types';
 import { MOCK_FACTORIES, RegionCalculationResult, calculateGeodesicStats } from '@/services/apiService';
 
 // Fix Leaflet Default Icon Urls
@@ -19,6 +19,7 @@ L.Icon.Default.mergeOptions({
 
 interface ProfessionalGISMapProps {
   clusters: PlasticCluster[];
+  currentRegion: SelectedRegion | null;
   onClusterClick: (cluster: PlasticCluster) => void;
   onRegionSelected: (coords: Array<[number, number]>, stats: RegionCalculationResult) => void;
   driftDays: number;
@@ -26,6 +27,7 @@ interface ProfessionalGISMapProps {
 
 export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
   clusters,
+  currentRegion,
   onClusterClick,
   onRegionSelected,
   driftDays,
@@ -58,7 +60,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
   const drawPolygonPointsRef = useRef<L.LatLng[]>([]);
   const tempShapeRef = useRef<L.Layer | null>(null);
 
-  // Initialize Map
+  // Initialize Map cleanly
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
@@ -109,26 +111,8 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
     const currentsGroup = L.layerGroup().addTo(map);
     currentsLayerRef.current = currentsGroup;
 
-    // Add Zoom Control at bottom right (adjusted position)
+    // Add Zoom Control at bottom right
     L.control.zoom({ position: 'bottomright' }).addTo(map);
-
-    // Initial default polygon selection
-    const defaultCoords: Array<[number, number]> = [
-      [12.95, 80.20],
-      [12.95, 80.30],
-      [12.89, 80.30],
-      [12.89, 80.20],
-    ];
-    L.polygon(defaultCoords, {
-      color: '#0A84FF',
-      weight: 2,
-      fillColor: '#0A84FF',
-      fillOpacity: 0.15,
-      dashArray: '5, 5',
-    }).addTo(drawnItems);
-
-    const stats = calculateGeodesicStats(defaultCoords);
-    onRegionSelected(defaultCoords, stats);
 
     // Mousemove tracking
     map.on('mousemove', (e: L.LeafletMouseEvent) => {
@@ -158,6 +142,20 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
       mapRef.current = null;
     };
   }, []);
+
+  // Clear drawn shapes when currentRegion is reset to null
+  useEffect(() => {
+    if (!currentRegion && drawnItemsRef.current) {
+      drawnItemsRef.current.clearLayers();
+      if (tempShapeRef.current && mapRef.current) {
+        mapRef.current.removeLayer(tempShapeRef.current);
+        tempShapeRef.current = null;
+      }
+      drawPolygonPointsRef.current = [];
+      isDrawingRef.current = false;
+      drawStartRef.current = null;
+    }
+  }, [currentRegion]);
 
   // Base Layer & Overlay Visibility
   useEffect(() => {
@@ -292,7 +290,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
       const tool = gisToolbar.activeTool;
       if (!map || !tool) return;
 
-      if (tool === 'rectangle') {
+      if (tool === 'rectangle' || tool === 'select') {
         if (!isDrawingRef.current) {
           isDrawingRef.current = true;
           drawStartRef.current = e.latlng;
@@ -322,7 +320,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
           const stats = calculateGeodesicStats(coords);
           onRegionSelected(coords, stats);
         }
-      } else if (tool === 'polygon') {
+      } else if (tool === 'polygon' || tool === 'area') {
         drawPolygonPointsRef.current.push(e.latlng);
         if (tempShapeRef.current) map.removeLayer(tempShapeRef.current);
         const pts = drawPolygonPointsRef.current.map((p) => [p.lat, p.lng] as [number, number]);
@@ -352,6 +350,14 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
             .bindTooltip(`Coordinates: ${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`)
             .addTo(drawnItemsRef.current);
         }
+        const coords: Array<[number, number]> = [
+          [e.latlng.lat + 0.02, e.latlng.lng - 0.02],
+          [e.latlng.lat + 0.02, e.latlng.lng + 0.02],
+          [e.latlng.lat - 0.02, e.latlng.lng + 0.02],
+          [e.latlng.lat - 0.02, e.latlng.lng - 0.02],
+        ];
+        const stats = calculateGeodesicStats(coords);
+        onRegionSelected(coords, stats);
       }
     },
     [gisToolbar.activeTool, onRegionSelected]
@@ -370,7 +376,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
     <div className="relative w-full h-full bg-[#07172A] overflow-hidden select-none">
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
-      {/* Clean Live Coordinate Panel placed in Bottom Right without overlap */}
+      {/* Clean Live Coordinate Panel placed in Bottom Right */}
       <div className="absolute right-14 bottom-6 z-[800] bg-[#07172A]/90 border border-[#0A84FF]/30 backdrop-blur-xl px-3 py-1.5 rounded-xl text-white font-mono text-[11px] shadow-lg flex items-center space-x-3">
         <div className="flex items-center space-x-1">
           <span className="text-gray-400">LAT:</span>
