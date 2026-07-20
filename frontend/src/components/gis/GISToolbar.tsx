@@ -4,7 +4,7 @@ import {
   Zap,
   Plus,
   Square,
-  Polygon,
+  Hexagon,
   Map,
   Ruler,
   Circle,
@@ -34,7 +34,7 @@ export const GISToolbar: React.FC = () => {
     {
       id: 'polygon',
       label: 'Polygon',
-      icon: Polygon,
+      icon: Hexagon,
       description: 'Draw polygon region',
     },
     {

@@ -1,7 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Toaster } from '@/components/ui/sonner';
 import { DashboardProvider } from '@/context/DashboardContext';
 import LandingPage from '@/pages/LandingPage';
 import DashboardPage from '@/pages/DashboardPage';
@@ -23,7 +22,6 @@ function App() {
             <Route path="/reports" element={<ReportsPage />} />
             <Route path="/about" element={<AboutPage />} />
           </Routes>
-          <Toaster />
         </Router>
       </DashboardProvider>
     </QueryClientProvider>
