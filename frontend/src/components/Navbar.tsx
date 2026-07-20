@@ -1,12 +1,14 @@
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Home, Map, BarChart3, Waves } from "lucide-react";
+import { Home, Map, BarChart3, Radio, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { to: "/", label: "Home", icon: Home },
   { to: "/dashboard", label: "Dashboard", icon: Map },
+  { to: "/monitoring", label: "Monitoring", icon: Radio },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/reports", label: "Reports", icon: FileText },
 ];
 
 export default function Navbar() {
