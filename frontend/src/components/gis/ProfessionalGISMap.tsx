@@ -2,9 +2,8 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useDashboard } from '@/context/DashboardContext';
-import { PlasticCluster, MapLayer } from '@/types';
+import { PlasticCluster } from '@/types';
 import { MOCK_FACTORIES, RegionCalculationResult, calculateGeodesicStats } from '@/services/apiService';
-import * as turf from '@turf/turf';
 
 // Fix Leaflet Default Icon Urls
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
@@ -40,7 +39,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
   const [mouseCoords, setMouseCoords] = useState<{ lat: number; lng: number; zoom: number; x: number; y: number }>({
     lat: 12.9213,
     lng: 80.2488,
-    zoom: 10,
+    zoom: 11,
     x: 0,
     y: 0,
   });
@@ -63,7 +62,6 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
-    // Create Leaflet Map centered over ocean region (Bay of Bengal / Chennai coast)
     const map = L.map(mapContainerRef.current, {
       center: [12.9213, 80.2488],
       zoom: 11,
@@ -111,7 +109,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
     const currentsGroup = L.layerGroup().addTo(map);
     currentsLayerRef.current = currentsGroup;
 
-    // Add Zoom Control at bottom right
+    // Add Zoom Control at bottom right (adjusted position)
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     // Initial default polygon selection
@@ -121,7 +119,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
       [12.89, 80.30],
       [12.89, 80.20],
     ];
-    const defaultRect = L.polygon(defaultCoords, {
+    L.polygon(defaultCoords, {
       color: '#0A84FF',
       weight: 2,
       fillColor: '#0A84FF',
@@ -142,7 +140,6 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
         y: Math.round(e.containerPoint.y),
       });
 
-      // Handle dragging rectangle preview
       if (isDrawingRef.current && drawStartRef.current && gisToolbar.activeTool === 'rectangle') {
         if (tempShapeRef.current) map.removeLayer(tempShapeRef.current);
         const bounds = L.latLngBounds(drawStartRef.current, e.latlng);
@@ -162,13 +159,11 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
     };
   }, []);
 
-  // Update Base Layer & Overlay Visibility based on mapLayers state
+  // Base Layer & Overlay Visibility
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    // Base basemaps switching
-    const satelliteVisible = mapLayers.find((l) => l.id === 'satellite')?.visible;
     const terrainVisible = mapLayers.find((l) => l.id === 'terrain')?.visible;
     const oceanVisible = mapLayers.find((l) => l.id === 'ocean')?.visible;
 
@@ -205,7 +200,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
       }
     }
 
-    // Ocean Currents Layer (Vector lines visualization)
+    // Ocean Currents Layer
     const currentLayerConf = mapLayers.find((l) => l.id === 'current');
     if (currentsLayerRef.current) {
       currentsLayerRef.current.clearLayers();
@@ -215,9 +210,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
           [13.00, 80.28], [13.05, 80.35], [12.80, 80.22], [13.10, 80.38],
         ];
         gridPoints.forEach(([lat, lng]) => {
-          const endLat = lat + 0.025;
-          const endLng = lng + 0.035;
-          L.polyline([[lat, lng], [endLat, endLng]], {
+          L.polyline([[lat, lng], [lat + 0.025, lng + 0.035]], {
             color: '#00F5D4',
             weight: 2,
             opacity: 0.6,
@@ -228,7 +221,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
     }
   }, [mapLayers]);
 
-  // Render Plastic Clusters Hotspots & Drift Offset
+  // Plastic Clusters & Particle Path Animation
   useEffect(() => {
     const map = mapRef.current;
     const group = clusterLayerRef.current;
@@ -240,28 +233,18 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
     if (!detectionLayerConf?.visible) return;
 
     clusters.forEach((cluster) => {
-      // Calculate temporal drift offset based on slider (driftDays)
       const latDrift = cluster.latitude + (driftDays * 0.0008);
       const lngDrift = cluster.longitude + (driftDays * 0.0012);
 
-      let color = '#22C55E'; // Clean / Low 🟢
-      let fillColor = '#22C55E';
-
-      if (cluster.riskLevel === 'critical' || cluster.riskLevel === 'high') {
-        color = '#EF4444'; // High 🔴
-        fillColor = '#EF4444';
-      } else if (cluster.riskLevel === 'medium') {
-        color = '#F59E0B'; // Medium 🟠
-        fillColor = '#F59E0B';
-      } else if (cluster.riskLevel === 'low') {
-        color = '#EAB308'; // Low 🟡
-        fillColor = '#EAB308';
-      }
+      let color = '#22C55E';
+      if (cluster.riskLevel === 'critical' || cluster.riskLevel === 'high') color = '#EF4444';
+      else if (cluster.riskLevel === 'medium') color = '#F59E0B';
+      else if (cluster.riskLevel === 'low') color = '#EAB308';
 
       const circle = L.circleMarker([latDrift, lngDrift], {
         radius: Math.max(6, Math.min(16, cluster.estimatedArea / 50)),
         color,
-        fillColor,
+        fillColor: color,
         fillOpacity: 0.7,
         weight: 2,
         className: 'animate-pulse cursor-pointer',
@@ -279,10 +262,8 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
       circle.addTo(group);
     });
 
-    // Particle flow line animation from Factory to selected cluster
     if (clusters.length > 0 && particleLayerRef.current) {
       particleLayerRef.current.clearLayers();
-
       const fac = MOCK_FACTORIES[0];
       const targetCluster = clusters[0];
 
@@ -294,12 +275,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
           [(fac.latitude + targetCluster.latitude) / 2, (fac.longitude + targetCluster.longitude) / 2],
           [targetCluster.latitude, targetCluster.longitude],
         ],
-        {
-          color: '#0A84FF',
-          weight: 3,
-          opacity: 0.8,
-          dashArray: '8, 8',
-        }
+        { color: '#0A84FF', weight: 3, opacity: 0.8, dashArray: '8, 8' }
       ).addTo(particleLayerRef.current);
 
       polyline.bindTooltip(
@@ -309,7 +285,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
     }
   }, [clusters, driftDays, mapLayers, onClusterClick]);
 
-  // Click handler for custom drawing tools (Rectangle, Polygon, Marker, Distance, Area)
+  // Click handler for drawing tools
   const handleMapClick = useCallback(
     (e: L.LeafletMouseEvent) => {
       const map = mapRef.current;
@@ -348,9 +324,7 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
         }
       } else if (tool === 'polygon') {
         drawPolygonPointsRef.current.push(e.latlng);
-
         if (tempShapeRef.current) map.removeLayer(tempShapeRef.current);
-
         const pts = drawPolygonPointsRef.current.map((p) => [p.lat, p.lng] as [number, number]);
 
         tempShapeRef.current = L.polyline(pts, {
@@ -386,7 +360,6 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-
     map.on('click', handleMapClick);
     return () => {
       map.off('click', handleMapClick);
@@ -395,34 +368,23 @@ export const ProfessionalGISMap: React.FC<ProfessionalGISMapProps> = ({
 
   return (
     <div className="relative w-full h-full bg-[#07172A] overflow-hidden select-none">
-      {/* Map Container */}
       <div ref={mapContainerRef} className="w-full h-full z-0" />
 
-      {/* Professional Live Coordinate Display Footer */}
-      <div className="absolute left-6 bottom-6 z-[1000] bg-[#07172A]/90 border border-[#0A84FF]/40 backdrop-blur-xl px-4 py-2 rounded-xl text-white font-mono text-xs shadow-xl flex items-center space-x-4">
-        <div className="flex items-center space-x-1.5">
+      {/* Clean Live Coordinate Panel placed in Bottom Right without overlap */}
+      <div className="absolute right-14 bottom-6 z-[800] bg-[#07172A]/90 border border-[#0A84FF]/30 backdrop-blur-xl px-3 py-1.5 rounded-xl text-white font-mono text-[11px] shadow-lg flex items-center space-x-3">
+        <div className="flex items-center space-x-1">
           <span className="text-gray-400">LAT:</span>
           <span className="text-cyan-300 font-bold">{mouseCoords.lat}°</span>
         </div>
-        <div className="h-4 w-px bg-white/10" />
-        <div className="flex items-center space-x-1.5">
+        <div className="h-3 w-px bg-white/10" />
+        <div className="flex items-center space-x-1">
           <span className="text-gray-400">LNG:</span>
           <span className="text-cyan-300 font-bold">{mouseCoords.lng}°</span>
         </div>
-        <div className="h-4 w-px bg-white/10" />
-        <div className="flex items-center space-x-1.5">
+        <div className="h-3 w-px bg-white/10" />
+        <div className="flex items-center space-x-1">
           <span className="text-gray-400">ZOOM:</span>
           <span className="text-white font-bold">{mouseCoords.zoom}</span>
-        </div>
-        <div className="h-4 w-px bg-white/10" />
-        <div className="flex items-center space-x-1.5">
-          <span className="text-gray-400">CURSOR:</span>
-          <span className="text-gray-300">{mouseCoords.x}, {mouseCoords.y} px</span>
-        </div>
-        <div className="h-4 w-px bg-white/10" />
-        <div className="flex items-center space-x-1.5">
-          <span className="text-gray-400">SCALE:</span>
-          <span className="text-emerald-400 font-bold">1 : 50,000</span>
         </div>
       </div>
     </div>

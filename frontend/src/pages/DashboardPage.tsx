@@ -114,7 +114,7 @@ const DashboardPage: React.FC = () => {
           }
         />
 
-        {/* Selected Region Info Card (Bottom-Left) */}
+        {/* Selected Region Info Card (Top-Left, beside Toolbar) */}
         <RegionInfoCard
           region={currentRegion}
           stats={currentStats}
@@ -122,20 +122,20 @@ const DashboardPage: React.FC = () => {
           isAnalyzing={isAnalyzing}
         />
 
-        {/* Clickable Cluster Inspection Detail Panel (Top-Right) */}
+        {/* Clickable Cluster Inspection Detail Panel (Right Side) */}
         <ClusterDetailPanel
           cluster={selectedCluster}
           onClose={() => setSelectedCluster(null)}
         />
 
-        {/* AI Summary Panel (Appears after analysis) */}
+        {/* AI Summary Panel (Right Side, when no cluster selected) */}
         {summary && !selectedCluster && (
-          <div className="absolute right-6 top-24 z-[990] w-96">
+          <div className="absolute right-6 top-32 z-[990] w-88">
             <AISummaryPanel summary={summary} />
           </div>
         )}
 
-        {/* Bottom Interactive Timeline Slider */}
+        {/* Bottom Interactive Timeline Slider (Centered) */}
         <TimelineSlider
           selectedDays={driftDays}
           onTimeChange={(days) => setDriftDays(days)}

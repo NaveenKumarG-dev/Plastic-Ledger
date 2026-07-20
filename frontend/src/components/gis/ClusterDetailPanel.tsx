@@ -8,7 +8,6 @@ import {
   Flame,
   Clock,
   Factory,
-  Navigation,
   ShieldAlert,
   Dna,
   Zap,
@@ -77,111 +76,111 @@ export const ClusterDetailPanel: React.FC<ClusterDetailPanelProps> = ({ cluster,
         initial={{ opacity: 0, x: 50, scale: 0.95 }}
         animate={{ opacity: 1, x: 0, scale: 1 }}
         exit={{ opacity: 0, x: 50, scale: 0.95 }}
-        transition={{ duration: 0.3 }}
-        className="absolute right-6 top-24 z-[1000] w-96 bg-[#07172A]/95 border border-[#0A84FF]/40 backdrop-blur-2xl p-5 rounded-2xl shadow-2xl text-white font-sans overflow-hidden"
+        transition={{ duration: 0.2 }}
+        className="absolute right-6 top-32 z-[1000] w-88 max-h-[calc(100vh-200px)] overflow-y-auto bg-[#07172A]/95 border border-[#0A84FF]/40 backdrop-blur-2xl p-4 rounded-2xl shadow-2xl text-white font-sans scrollbar-thin scrollbar-thumb-white/10"
       >
         {/* Glow Header Accent */}
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-red-500 via-amber-400 to-[#0A84FF]" />
 
         {/* Top bar */}
-        <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
+        <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
           <div className="flex items-center space-x-2">
-            <div className="p-1.5 bg-red-500/20 rounded-lg text-red-400 border border-red-500/30">
-              <Flame className="w-5 h-5 animate-pulse" />
+            <div className="p-1 bg-red-500/20 rounded-lg text-red-400 border border-red-500/30">
+              <Flame className="w-4 h-4 animate-pulse" />
             </div>
             <div>
-              <h3 className="font-bold text-sm text-white font-mono uppercase tracking-wider">
+              <h3 className="font-bold text-xs text-white font-mono uppercase tracking-wider">
                 {cluster.id.toUpperCase()}
               </h3>
-              <p className="text-[11px] text-cyan-400/90 font-mono">Ocean Hotspot Inspection</p>
+              <p className="text-[10px] text-cyan-400/90 font-mono">Ocean Hotspot Inspection</p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+            className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Risk Badge & Confidence */}
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <span
-            className={`px-3 py-1 rounded-full text-xs font-mono font-bold border flex items-center space-x-2 ${riskBadge.bg}`}
+            className={`px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border flex items-center space-x-1.5 ${riskBadge.bg}`}
           >
-            <span className={`w-2 h-2 rounded-full animate-ping ${riskBadge.dot}`} />
+            <span className={`w-1.5 h-1.5 rounded-full animate-ping ${riskBadge.dot}`} />
             <span>{riskBadge.label}</span>
           </span>
 
-          <div className="flex items-center space-x-1.5 text-xs font-mono bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 px-3 py-1 rounded-full">
-            <Zap className="w-3.5 h-3.5" />
+          <div className="flex items-center space-x-1 text-[10px] font-mono bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 px-2.5 py-0.5 rounded-full">
+            <Zap className="w-3 h-3" />
             <span>{(cluster.confidence * 100).toFixed(0)}% Confidence</span>
           </div>
         </div>
 
         {/* Primary Cluster Metrics Grid */}
-        <div className="grid grid-cols-2 gap-2 mb-4">
-          <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-            <span className="text-[10px] text-gray-400 uppercase font-mono block">Polymer Type</span>
-            <div className="flex items-center space-x-1.5 mt-0.5">
-              <Dna className="w-4 h-4 text-cyan-400" />
-              <span className="text-base font-extrabold text-cyan-300 font-mono">
+        <div className="grid grid-cols-2 gap-1.5 mb-3">
+          <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+            <span className="text-[9px] text-gray-400 uppercase font-mono block">Polymer Type</span>
+            <div className="flex items-center space-x-1 mt-0.5">
+              <Dna className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-sm font-extrabold text-cyan-300 font-mono">
                 {cluster.polymerType}
               </span>
             </div>
           </div>
 
-          <div className="bg-white/5 p-3 rounded-xl border border-white/5">
-            <span className="text-[10px] text-gray-400 uppercase font-mono block">Estimated Area</span>
-            <div className="flex items-center space-x-1.5 mt-0.5">
-              <TrendingUp className="w-4 h-4 text-amber-400" />
-              <span className="text-base font-extrabold text-white font-mono">
-                {cluster.estimatedArea} <span className="text-[10px] text-gray-400">m²</span>
+          <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+            <span className="text-[9px] text-gray-400 uppercase font-mono block">Estimated Area</span>
+            <div className="flex items-center space-x-1 mt-0.5">
+              <TrendingUp className="w-3.5 h-3.5 text-amber-400" />
+              <span className="text-sm font-extrabold text-white font-mono">
+                {cluster.estimatedArea} <span className="text-[9px] text-gray-400">m²</span>
               </span>
             </div>
           </div>
         </div>
 
-        {/* Coordinate & Detail Rows */}
-        <div className="space-y-2 text-xs font-mono mb-4">
-          <div className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-lg border border-white/5">
-            <span className="text-gray-400 flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-cyan-400" /> Coordinates:
+        {/* Detail Rows */}
+        <div className="space-y-1.5 text-xs font-mono mb-3">
+          <div className="flex justify-between items-center bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/5">
+            <span className="text-gray-400 text-[11px] flex items-center gap-1">
+              <MapPin className="w-3 h-3 text-cyan-400" /> Coordinates:
             </span>
-            <span className="text-gray-200 font-bold">
+            <span className="text-gray-200 text-[11px] font-bold">
               {cluster.latitude.toFixed(4)}°, {cluster.longitude.toFixed(4)}°
             </span>
           </div>
 
-          <div className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-lg border border-white/5">
-            <span className="text-gray-400 flex items-center gap-1.5">
-              <Clock className="w-3.5 h-3.5 text-indigo-400" /> Estimated Age:
+          <div className="flex justify-between items-center bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/5">
+            <span className="text-gray-400 text-[11px] flex items-center gap-1">
+              <Clock className="w-3 h-3 text-indigo-400" /> Estimated Age:
             </span>
-            <span className="text-gray-200 font-bold">{cluster.estimatedAge} Days</span>
+            <span className="text-gray-200 text-[11px] font-bold">{cluster.estimatedAge} Days</span>
           </div>
 
-          <div className="flex justify-between items-center bg-white/5 px-3 py-2 rounded-lg border border-white/5">
-            <span className="text-gray-400 flex items-center gap-1.5">
-              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" /> Estimated Waste:
+          <div className="flex justify-between items-center bg-white/5 px-2.5 py-1.5 rounded-lg border border-white/5">
+            <span className="text-gray-400 text-[11px] flex items-center gap-1">
+              <ShieldAlert className="w-3 h-3 text-amber-400" /> Estimated Waste:
             </span>
-            <span className="text-amber-300 font-bold">{cluster.estimatedQuantity} Metric Tons</span>
+            <span className="text-amber-300 text-[11px] font-bold">{cluster.estimatedQuantity} Metric Tons</span>
           </div>
         </div>
 
         {/* Source Attribution Section */}
-        <div className="bg-gradient-to-br from-white/5 to-white/[0.02] p-3.5 rounded-xl border border-white/10 space-y-2.5">
-          <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
-            <span className="text-xs font-bold font-mono text-cyan-300 uppercase flex items-center gap-1.5">
-              <Factory className="w-4 h-4 text-[#0A84FF]" /> Source Attribution
+        <div className="bg-gradient-to-br from-white/5 to-white/[0.02] p-3 rounded-xl border border-white/10 space-y-1.5">
+          <div className="flex items-center justify-between border-b border-white/10 pb-1">
+            <span className="text-[11px] font-bold font-mono text-cyan-300 uppercase flex items-center gap-1">
+              <Factory className="w-3.5 h-3.5 text-[#0A84FF]" /> Source Attribution
             </span>
-            <span className="text-[10px] text-gray-400 font-mono">Particle Trajectory</span>
+            <span className="text-[9px] text-gray-400 font-mono">Particle Path</span>
           </div>
 
-          <div className="space-y-1.5 text-xs font-mono">
+          <div className="space-y-1 text-[11px] font-mono">
             <div className="flex justify-between">
               <span className="text-gray-400">Likely Source:</span>
-              <span className="text-cyan-200 font-semibold truncate max-w-[170px]" title={attribution?.factory}>
+              <span className="text-cyan-200 font-semibold truncate max-w-[150px]" title={attribution?.factory}>
                 {attribution?.factory || cluster.possibleSourceFactory || 'Industrial Zone'}
               </span>
             </div>
@@ -201,7 +200,7 @@ export const ClusterDetailPanel: React.FC<ClusterDetailPanelProps> = ({ cluster,
             </div>
 
             <div className="flex justify-between">
-              <span className="text-gray-400">Estimated Drift Time:</span>
+              <span className="text-gray-400">Drift Time:</span>
               <span className="text-amber-400 font-bold">
                 {attribution ? `${attribution.travelTimeDays} Days` : '11 Days'}
               </span>
