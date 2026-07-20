@@ -139,7 +139,7 @@ Plastic-Ledger automatically:
 | 2 | **Preprocess** | Normalise and tile bands into patches | rasterio, numpy | 256×256 `.npz` patches |
 | 3 | **Detect** | Segment debris from non-debris | U-Net + ResNet-34, PyTorch, TTA | `detections.geojson` |
 | 4 | **Polymer** | Classify debris type from spectrum | Spectral indices (PI, SR, NSI, FDI) | `detections_classified.geojson` |
-| 5 | **Backtrack** | Trace debris origin via particle modelling | CMEMS, ERA5, RK4 integration, DBSCAN | Trajectory GeoJSONs + source regions |
+| 5 | **Backtrack** | Trace debris origin via particle modelling | CMEMS, ERA5, OceanParcels, DBSCAN | Trajectory GeoJSONs + source regions |
 | 6 | **Attribute** | Score sources against human activities | GFW API, OSM, shipping lanes | `attribution_report.json` |
 | 7 | **Report** | Assemble final reports | fpdf2, matplotlib | PDF, GeoJSON, CSV |
 
@@ -172,7 +172,7 @@ CLASSIFIED DETECTIONS (GeoJSON + polymer_type column)
         ├─────────────────────────────────────────────┐
         │                                             │
         │ Stage 5: Particle release +                 │
-        │ RK4 back-tracking + DBSCAN                  │
+        │ OceanParcels back-tracking + DBSCAN         │
         ▼                                             │
 SOURCE REGIONS (JSON list)                           │
         │                                             │

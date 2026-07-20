@@ -6,7 +6,7 @@
 
 ## Overview
 
-Stage 5 implements a **Lagrangian particle back-tracking** model. Starting from the centroid of each confirmed debris cluster at the time of satellite detection, it releases virtual particles and integrates them **backward in time** through ocean current and wind fields. The endpoints of all particle trajectories cluster into **probable source regions**.
+Stage 5 implements a **Lagrangian particle back-tracking** model using the **OceanParcels** framework. Starting from the centroid of each confirmed debris cluster at the time of satellite detection, it releases virtual particles and integrates them **backward in time** through ocean current and wind fields. The endpoints of all particle trajectories cluster into **probable source regions**.
 
 ---
 
@@ -109,45 +109,23 @@ w_wind  = 0.03   # 3% wind-driven drift
 
 ---
 
-## Unit Conversion
+## OceanParcels Integration
 
-Ocean current velocities are in m/s. They must be converted to degrees/hour for geographic particle movement:
+The pipeline utilizes the **OceanParcels** framework (`parcels`) to construct a `FieldSet` from the downloaded NetCDF files. The ocean currents (`uo`, `vo`) and wind fields (`u10`, `v10`) are ingested directly without manual geographic conversions (handled internally by OceanParcels spherical mesh).
 
-```
-deg_per_m_lat = 1 / 111,000           # 1° lat ≈ 111 km
+Each particle is integrated backward in time using a `ParticleSet` with a combination of two kernels:
 
-deg_per_m_lon = 1 / (111,000 × cos(lat))   # accounts for meridional compression
+1. **`AdvectionRK4`**: Built-in 4th-order Runge-Kutta advection over the ocean current fields.
+2. **`StokesDriftWindage`**: A custom kernel that applies a configurable windage factor (default 3% of wind speed) to simulate the wind-driven drift of floating macroplastics.
 
-dx_dt = u_total × deg_per_m_lon × 3600   # degrees per hour
-dy_dt = v_total × deg_per_m_lat × 3600
-```
-
----
-
-## RK4 Backward Integration
-
-Each particle is integrated backward in time using the **4th-order Runge-Kutta** scheme:
-
-```
-# Time step: dt (hours)
-# Backward: negate velocities
-
-k1x, k1y = -vel(lon,              lat,              t)
-k2x, k2y = -vel(lon + k1x×dt/2,  lat + k1y×dt/2,  t - dt/2)
-k3x, k3y = -vel(lon + k2x×dt/2,  lat + k2y×dt/2,  t - dt/2)
-k4x, k4y = -vel(lon + k3x×dt,    lat + k3y×dt,    t - dt)
-
-dlon = (k1x + 2×k2x + 2×k3x + k4x) / 6 × dt
-dlat = (k1y + 2×k2y + 2×k3y + k4y) / 6 × dt
-
-new_lon = lon + dlon
-new_lat = lat + dlat
-```
-
-**Boundary conditions:**
+**Backward execution:**
 ```python
-new_lat = clip(new_lat, -85, 85)           # Polar cap
-new_lon = ((new_lon + 180) % 360) - 180   # Longitude wrap-around
+pset.execute(
+    kernel,
+    runtime=timedelta(days=bt_days),
+    dt=timedelta(hours=-dt_hours),  # Negative dt for backward tracking
+    output_file=pfile
+)
 ```
 
 ---
@@ -208,8 +186,8 @@ Each DBSCAN cluster becomes a **source region**:
 5. For each confirmed debris cluster:
      a. Release n_particles (default 50) with ±1 km random offsets
      b. For each particle:
-          - Run RK4 backward integration for bt_days × 24 hours
-          - Record trajectory (lon, lat, time) at 1-hour steps
+          - Run OceanParcels execution backward for bt_days
+          - Record trajectory (lon, lat, time) automatically via Zarr output
      c. Extract trajectory endpoint (oldest time step)
      d. DBSCAN-cluster endpoints → source regions
      e. Save backtrack_<id>.geojson with trajectory lines

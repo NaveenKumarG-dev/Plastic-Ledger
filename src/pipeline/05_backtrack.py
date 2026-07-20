@@ -19,6 +19,7 @@ import inspect
 import os
 import sys
 import warnings
+import math
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -27,6 +28,8 @@ import numpy as np
 import geopandas as gpd
 from shapely.geometry import LineString, Point, MultiPoint, box
 from sklearn.cluster import DBSCAN
+
+from parcels import FieldSet, ParticleSet, JITParticle, AdvectionRK4, Variable
 
 from pipeline.utils.logging_utils import get_logger
 from pipeline.utils.geo_utils import expand_bbox, retry_request
@@ -220,228 +223,63 @@ def download_wind_data(
 
 
 # ─────────────────────────────────────────────
-# CURRENT/WIND INTERPOLATION
+# OCEANPARCELS SETUP & KERNELS
 # ─────────────────────────────────────────────
-def _load_velocity_field(nc_path: Optional[Path]) -> Optional[Any]:
-    """Load a NetCDF velocity field into an in-memory numpy dict.
-
-    Args:
-        nc_path: Path to the NetCDF file.
-
-    Returns:
-        Dict with keys ``times``, ``lats``, ``lons``, ``data`` (all numpy),
-        or ``None`` if the file is missing or unreadable.
-    """
-    if nc_path is None or not nc_path.exists():
+def load_parcels_fieldset(ocean_nc: Optional[Path], wind_nc: Optional[Path]) -> Optional[FieldSet]:
+    """Load CMEMS and ERA5 NetCDF files into a combined OceanParcels FieldSet."""
+    if not ocean_nc or not ocean_nc.exists() or not wind_nc or not wind_nc.exists():
+        logger.warning("Missing forcing data for OceanParcels. Using fallback logic.")
         return None
+
     try:
         import xarray as xr
-        import pandas as pd
-        with xr.open_dataset(nc_path) as ds:
+        
+        # Determine time dimension name dynamically
+        def get_time_dim(nc_path):
+            with xr.open_dataset(nc_path) as ds:
+                if "time" in ds.coords: return "time"
+                if "valid_time" in ds.coords: return "valid_time"
+                return next((c for c in ds.coords if "time" in c.lower()), list(ds.dims)[0])
+        
+        ocean_time = get_time_dim(ocean_nc)
+        wind_time = get_time_dim(wind_nc)
 
-            # ── coordinate names (CMEMS uses 'longitude'/'latitude'; ERA5 does too) ──
-            lon_name = "longitude" if "longitude" in ds.coords else "lon"
-            lat_name = "latitude" if "latitude" in ds.coords else "lat"
-            # ERA5 from the new CDS-Beta API uses 'valid_time' instead of 'time'
-            if "time" in ds.coords:
-                time_name = "time"
-            elif "valid_time" in ds.coords:
-                time_name = "valid_time"
-            else:
-                time_name = next(
-                    (c for c in ds.coords if "time" in c.lower()), list(ds.dims)[0]
-                )
+        filenames = {'U': str(ocean_nc), 'V': str(ocean_nc)}
+        variables = {'U': 'uo', 'V': 'vo'}
+        dimensions = {'U': {'lon': 'longitude', 'lat': 'latitude', 'time': ocean_time},
+                      'V': {'lon': 'longitude', 'lat': 'latitude', 'time': ocean_time}}
+        
+        # Create base fieldset with ocean currents
+        fieldset = FieldSet.from_netcdf(filenames, variables, dimensions, allow_time_extrapolation=True)
 
-            # ── time → tz-naive datetime64[ns] ──────────────────────────────────────
-            # CMEMS data often uses cftime objects (object dtype).  Convert to plain
-            # datetime64[ns] so numpy arithmetic works without pandas dtype juggling.
-            times_raw = ds[time_name].values
-            if times_raw.dtype == object:
-                times_np = np.array(
-                    [np.datetime64(pd.Timestamp(str(t)).replace(tzinfo=None), "ns")
-                     for t in times_raw],
-                    dtype="datetime64[ns]",
-                )
-            else:
-                # Cast to ns; if tz-aware, the cast strips the tz component.
-                times_np = times_raw.astype("datetime64[ns]")
-
-            lats_np = ds[lat_name].values.astype(np.float64)
-            lons_np = ds[lon_name].values.astype(np.float64)
-
-            # ── preload data variables into numpy ───────────────────────────────────
-            # Squeeze out any singleton depth dimension so shape is (time, lat, lon).
-            data: Dict[str, Any] = {}
-            for var in ds.data_vars:
-                arr = ds[var].values          # triggers actual disk read — done once
-                while arr.ndim > 3:
-                    arr = arr[:, 0]           # drop leading extra dim (e.g. depth)
-                data[var] = arr.astype(np.float32)
-
-            return {"times": times_np, "lats": lats_np, "lons": lons_np, "data": data}
-
-    except Exception as exc:
-        logger.warning("Failed to load %s: %s", nc_path, exc)
+        # Load and add wind data
+        wind_filenames = {'U_wind': str(wind_nc), 'V_wind': str(wind_nc)}
+        wind_variables = {'U_wind': 'u10', 'V_wind': 'v10'}
+        wind_dimensions = {'U_wind': {'lon': 'longitude', 'lat': 'latitude', 'time': wind_time},
+                           'V_wind': {'lon': 'longitude', 'lat': 'latitude', 'time': wind_time}}
+                           
+        wind_fieldset = FieldSet.from_netcdf(wind_filenames, wind_variables, wind_dimensions, allow_time_extrapolation=True)
+        fieldset.add_field(wind_fieldset.U_wind)
+        fieldset.add_field(wind_fieldset.V_wind)
+        
+        return fieldset
+    except Exception as e:
+        logger.warning(f"Failed to create FieldSet: {e}")
         return None
 
-
-def _interpolate_velocity(
-    field: Optional[Any],
-    lon: float,
-    lat: float,
-    time_dt: datetime,
-    u_var: str = "uo",
-    v_var: str = "vo",
-) -> Tuple[float, float]:
-    """Interpolate velocity at a point using preloaded numpy arrays.
-
-    Args:
-        field: Dict returned by :func:`_load_velocity_field`, or ``None``.
-        lon: Longitude.
-        lat: Latitude.
-        time_dt: Datetime for temporal interpolation.
-        u_var: Name of eastward velocity variable.
-        v_var: Name of northward velocity variable.
-
-    Returns:
-        ``(u, v)`` velocity in m/s.
-    """
-    if field is None:
-        # Synthetic fallback: small random current
-        rng = np.random.default_rng(int(abs(lon * 1000 + lat * 1000)))
-        return float(rng.normal(0.02, 0.01)), float(rng.normal(0.01, 0.01))
-
-    try:
-        # Strip timezone so comparison is always tz-naive vs tz-naive.
-        tz = getattr(time_dt, "tzinfo", None)
-        time_naive = time_dt.replace(tzinfo=None) if tz is not None else time_dt
-        time_np = np.datetime64(time_naive, "ns")
-
-        # Pure numpy nearest-neighbour — no xarray/pandas overhead per call.
-        t_idx   = int(np.argmin(np.abs(field["times"] - time_np)))
-        lat_idx = int(np.argmin(np.abs(field["lats"]  - lat)))
-        lon_idx = int(np.argmin(np.abs(field["lons"]  - lon)))
-
-        u = float(field["data"][u_var][t_idx, lat_idx, lon_idx])
-        v = float(field["data"][v_var][t_idx, lat_idx, lon_idx])
-
-        if np.isnan(u):
-            u = 0.0
-        if np.isnan(v):
-            v = 0.0
-        return u, v
-    except Exception:
-        return 0.0, 0.0
-
-
-# ─────────────────────────────────────────────
-# RK4 INTEGRATION
-# ─────────────────────────────────────────────
-def _velocity_at(
-    lon: float,
-    lat: float,
-    time_dt: datetime,
-    ocean_ds: Any,
-    wind_ds: Any,
-    ocean_wind_ratio: Tuple[float, float] = (0.97, 0.03),
-) -> Tuple[float, float]:
-    """Compute total velocity at a point (ocean + wind drift).
-
-    Args:
-        lon: Longitude.
-        lat: Latitude.
-        time_dt: Current time.
-        ocean_ds: Ocean current dataset.
-        wind_ds: Wind dataset.
-        ocean_wind_ratio: ``(ocean_weight, wind_weight)``.
-
-    Returns:
-        ``(dx_dt, dy_dt)`` in degrees/hour (approximate).
-    """
-    u_ocean, v_ocean = _interpolate_velocity(ocean_ds, lon, lat, time_dt)
-    u_wind, v_wind = _interpolate_velocity(
-        wind_ds, lon, lat, time_dt, u_var="u10", v_var="v10",
-    )
-
-    # Combine with Stokes drift approximation
-    u = ocean_wind_ratio[0] * u_ocean + ocean_wind_ratio[1] * u_wind
-    v = ocean_wind_ratio[0] * v_ocean + ocean_wind_ratio[1] * v_wind
-
-    # Convert m/s to degrees/hour (approximate)
-    # 1 degree latitude ≈ 111,000 m
-    # 1 degree longitude ≈ 111,000 * cos(lat) m
-    deg_per_m_lat = 1.0 / 111_000.0
-    deg_per_m_lon = 1.0 / (111_000.0 * np.cos(np.radians(lat)) + 1e-10)
-
-    dx_dt = u * deg_per_m_lon * 3600  # degrees/hour
-    dy_dt = v * deg_per_m_lat * 3600
-
-    return dx_dt, dy_dt
-
-
-def backtrack_particle(
-    start_lon: float,
-    start_lat: float,
-    start_time: datetime,
-    ocean_ds: Any,
-    wind_ds: Any,
-    hours: int = 720,
-    dt_hours: float = 1.0,
-    ocean_wind_ratio: Tuple[float, float] = (0.97, 0.03),
-) -> List[Tuple[float, float, datetime]]:
-    """Back-track a single particle using RK4 integration.
-
-    Args:
-        start_lon: Starting longitude.
-        start_lat: Starting latitude.
-        start_time: Detection time.
-        ocean_ds: Ocean current dataset.
-        wind_ds: Wind dataset.
-        hours: Total hours to integrate backward.
-        dt_hours: Time step in hours.
-        ocean_wind_ratio: ``(ocean_weight, wind_weight)``.
-
-    Returns:
-        List of ``(lon, lat, time)`` trajectory points (oldest first).
-    """
-    trajectory = [(start_lon, start_lat, start_time)]
-    lon, lat = start_lon, start_lat
-    t = start_time
-
-    # Simple RK4 land check: keep particles in water (lat ∈ [-85, 85])
-    n_steps = int(hours / dt_hours)
-
-    for _ in range(n_steps):
-        t_prev = t
-        t = t - timedelta(hours=dt_hours)
-
-        # RK4 (backward)
-        def vel(lo, la, ti):
-            dx, dy = _velocity_at(lo, la, ti, ocean_ds, wind_ds, ocean_wind_ratio)
-            return -dx, -dy  # negative = backward in time
-
-        k1x, k1y = vel(lon, lat, t_prev)
-        t_mid = t_prev - timedelta(hours=dt_hours / 2)
-        k2x, k2y = vel(lon + k1x * dt_hours / 2, lat + k1y * dt_hours / 2, t_mid)
-        k3x, k3y = vel(lon + k2x * dt_hours / 2, lat + k2y * dt_hours / 2, t_mid)
-        k4x, k4y = vel(lon + k3x * dt_hours, lat + k3y * dt_hours, t)
-
-        dlon = (k1x + 2 * k2x + 2 * k3x + k4x) / 6.0 * dt_hours
-        dlat = (k1y + 2 * k2y + 2 * k3y + k4y) / 6.0 * dt_hours
-
-        new_lon = lon + dlon
-        new_lat = lat + dlat
-
-        # Simple land check: clamp to ocean (very rough)
-        new_lat = np.clip(new_lat, -85, 85)
-        new_lon = ((new_lon + 180) % 360) - 180  # wrap longitude
-
-        lon, lat = new_lon, new_lat
-        trajectory.append((lon, lat, t))
-
-    trajectory.reverse()  # oldest first
-    return trajectory
-
+def StokesDriftWindage(particle, fieldset, time):
+    """Custom Parcels Kernel for 3% wind drift (Stokes drift approximation)."""
+    # math is imported automatically in Parcels kernels, but we need to calculate degrees
+    u_wind = fieldset.U_wind[time, particle.depth, particle.lat, particle.lon]
+    v_wind = fieldset.V_wind[time, particle.depth, particle.lat, particle.lon]
+    
+    # Approx degrees per meter
+    lat_dist = 111000.0
+    lon_dist = 111000.0 * math.cos(particle.lat * math.pi / 180.0)
+    
+    # 0.03 is the 3% windage
+    particle_dlon += (u_wind * 0.03 / lon_dist) * particle.dt
+    particle_dlat += (v_wind * 0.03 / lat_dist) * particle.dt
 
 # ─────────────────────────────────────────────
 # ENDPOINT CLUSTERING
@@ -612,8 +450,10 @@ def run(
     logger.info("Downloading wind data")
     wind_path = download_wind_data(expanded_bbox, bt_start, bt_end, data_dir)
 
-    ocean_ds = _load_velocity_field(ocean_path)
-    wind_ds = _load_velocity_field(wind_path)
+    fieldset = load_parcels_fieldset(ocean_path, wind_path)
+    if fieldset is None:
+        logger.error("Could not load FieldSet. Back-tracking aborted.")
+        return []
 
     # Run back-tracking for each cluster
     all_sources = []
@@ -630,24 +470,72 @@ def run(
 
         # Release particles with small random offsets
         rng = np.random.default_rng(int(cluster_id) + 42)
-        endpoints = []
-        all_trajectories = []
+        lons = []
+        lats = []
+        times = []
 
         for p in range(n_particles):
             # Add small random offset (±0.01 degrees ≈ ±1km)
             p_lon = centroid.x + rng.normal(0, 0.01)
             p_lat = centroid.y + rng.normal(0, 0.01)
+            lons.append(p_lon)
+            lats.append(p_lat)
+            times.append(det_dt)
 
-            traj = backtrack_particle(
-                p_lon, p_lat, det_dt,
-                ocean_ds, wind_ds,
-                hours=total_hours,
-                dt_hours=dt_hours,
-                ocean_wind_ratio=ocean_wind_ratio,
+        pset = ParticleSet.from_list(
+            fieldset=fieldset,
+            pclass=JITParticle,
+            lon=lons,
+            lat=lats,
+            time=times
+        )
+
+        # Construct execution kernel
+        kernel = pset.Kernel(AdvectionRK4)
+        if hasattr(fieldset, 'U_wind'):
+            kernel += pset.Kernel(StokesDriftWindage)
+
+        # Create output file
+        output_zarr = out_dir / f"backtrack_{cluster_id}.zarr"
+        pfile = pset.ParticleFile(name=str(output_zarr), outputdt=timedelta(hours=dt_hours))
+
+        try:
+            pset.execute(
+                kernel,
+                runtime=timedelta(hours=total_hours),
+                dt=-timedelta(hours=dt_hours),
+                output_file=pfile
             )
+        except Exception as e:
+            logger.error(f"Parcels execution failed for cluster {cluster_id}: {e}")
+            continue
 
-            endpoints.append((traj[0][0], traj[0][1]))  # oldest point
-            all_trajectories.append(traj)
+        # Load trajectories from Zarr to create GeoJSON
+        import xarray as xr
+        endpoints = []
+        all_trajectories = []
+        
+        try:
+            with xr.open_zarr(output_zarr) as ds_traj:
+                lons_array = ds_traj['lon'].values
+                lats_array = ds_traj['lat'].values
+                
+                # Zarr arrays from parcels 3.1.4 are usually (trajectory, obs)
+                for t_idx in range(lons_array.shape[0]):
+                    traj_lons = lons_array[t_idx, :]
+                    traj_lats = lats_array[t_idx, :]
+                    
+                    valid = ~np.isnan(traj_lons) & ~np.isnan(traj_lats)
+                    valid_lons = traj_lons[valid]
+                    valid_lats = traj_lats[valid]
+                    
+                    if len(valid_lons) > 0:
+                        # Oldest point is the last valid point since we track backwards
+                        endpoints.append((float(valid_lons[-1]), float(valid_lats[-1])))
+                        all_trajectories.append(list(zip(valid_lons, valid_lats)))
+        except Exception as e:
+            logger.error(f"Failed to read trajectories from {output_zarr}: {e}")
+            continue
 
         # Cluster endpoints
         sources = cluster_endpoints(endpoints, eps_degrees, min_samples)
@@ -662,9 +550,8 @@ def run(
         # Save trajectory GeoJSON per cluster
         traj_features = []
         for traj in all_trajectories:
-            coords = [(pt[0], pt[1]) for pt in traj]
-            if len(coords) >= 2:
-                traj_features.append(LineString(coords))
+            if len(traj) >= 2:
+                traj_features.append(LineString(traj))
 
         if traj_features:
             traj_gdf = gpd.GeoDataFrame(

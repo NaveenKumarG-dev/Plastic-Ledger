@@ -13,6 +13,7 @@ Dependencies: rasterio, numpy, shapely
 import argparse
 import json
 import sys
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -324,6 +325,17 @@ def tile_scene(
     return patches, patch_infos
 
 
+def _extract_crs_from_scene_id(scene_id: str) -> Optional[str]:
+    """Fallback: deduce UTM CRS from Sentinel-2 scene ID if missing from raster."""
+    match = re.search(r"_T(\d{2})([C-X])[A-Z]{2}_", scene_id)
+    if match:
+        zone = int(match.group(1))
+        lat_band = match.group(2)
+        is_north = lat_band >= 'N'
+        epsg = 32600 + zone if is_north else 32700 + zone
+        return f"EPSG:{epsg}"
+    return None
+
 # ─────────────────────────────────────────────
 # MAIN RUNNER
 # ─────────────────────────────────────────────
@@ -456,6 +468,9 @@ def run(
             geo_transform_list = list(patch_transform)[:6]
         else:
             geo_transform_list = None
+            
+        # Determine actual string CRS to save
+        crs_str = str(crs) if crs else _extract_crs_from_scene_id(scene_id)
 
         patch_index[patch_id] = {
             "row": info["row"],
@@ -466,7 +481,7 @@ def run(
             "actual_w": info["actual_w"],
             "patch_file": patch_path.name,
             "geo_transform": geo_transform_list,
-            "crs": str(crs) if crs else None,
+            "crs": crs_str,
             "nodata_mask_path": str(nodata_path),
         }
 
@@ -485,6 +500,9 @@ def run(
     with open(index_path, "w") as fh:
         json.dump(patch_index, fh, indent=2)
 
+    # Determine final scene CRS
+    final_crs = str(crs) if crs else _extract_crs_from_scene_id(scene_id)
+
     # Save scene metadata
     scene_meta = {
         "scene_id": scene_id,
@@ -494,7 +512,7 @@ def run(
         "overlap": overlap,
         "patch_storage": patch_storage,
         "patch_dtype": patch_dtype,
-        "crs": str(crs) if crs else None,
+        "crs": final_crs,
         "transform": list(transform)[:6] if transform else None,
     }
     with open(out_dir / "scene_meta.json", "w") as fh:
