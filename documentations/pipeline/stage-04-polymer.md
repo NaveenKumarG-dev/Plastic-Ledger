@@ -6,7 +6,7 @@
 
 ## Overview
 
-Stage 4 analyses the spectral signature of each detected debris cluster and classifies it by **probable polymer type** using a rule-based spectral decision tree. It computes four spectral indices from the Sentinel-2 reflectance data and maps them to polymer categories, also flagging organic-matter false positives.
+Stage 4 analyses the spectral signature of each detected debris cluster and classifies it by **probable polymer type** using a highly optimized, GPU-accelerated **XGBoost machine learning model**. The model evaluates 11 Sentinel-2 reflectance bands to classify the objects, explicitly identifying organic-matter false positives (like clouds, seaweed, or water) that were falsely flagged by the Stage 3 detection model. It also computes four spectral indices for transparency and fallback purposes.
 
 ---
 
@@ -121,7 +121,15 @@ Where wavelengths are:
 
 ---
 
-## Polymer Classification Decision Tree
+## Polymer Classification (XGBoost)
+
+The primary classifier is a GPU-accelerated XGBoost model (`polymer_xgb_model.json`) trained on the MARIDA dataset. It receives the 11-band mean spectral signature of the cluster as input and outputs a classification across 15 possible marine surface classes.
+
+If the classifier predicts a non-plastic class (e.g., "Clouds", "Sediment-Laden Water", "Sparse Sargassum"), the cluster is flagged as `is_false_positive = True`. If it predicts "Marine Debris", it is classified as plastic.
+
+### Rule-based Fallback
+
+If the XGBoost model is unavailable, the system falls back to a rule-based spectral decision tree:
 
 ```
 IF NSI > 0.2
@@ -158,7 +166,7 @@ ELSE
 
 ## Spectral Extraction
 
-To extract a debris cluster's mean spectrum, the normalized patch data is reconstructed from the patch cache:
+To extract a debris cluster's mean spectrum, the raw reflectance patch data is reconstructed from the patch cache (Stage 2 output):
 
 ```python
 # Reconstruct full scene from patches (averaging overlaps)
@@ -196,7 +204,7 @@ spectrum = scene_data[:, mask].mean(axis=1)  # shape (11,)
      a. Create pixel mask from cluster geometry
      b. Extract mean 11-band spectrum
      c. Compute PI, SR, NSI, FDI
-     d. Apply decision tree → polymer_type, is_false_positive
+     d. Apply XGBoost model (or fallback tree) → polymer_type, is_false_positive
        ↓
 4. Append polymer columns to GeoDataFrame
        ↓

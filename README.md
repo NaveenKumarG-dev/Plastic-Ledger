@@ -4,9 +4,9 @@
 
 Plastic-Ledger is an end-to-end Python pipeline that detects marine plastic debris in Sentinel-2
 satellite imagery, classifies the polymer type, traces debris back to its source using ocean
-current simulations, and generates comprehensive attribution reports. It uses a U-Net deep
+current simulations, and generates comprehensive attribution reports. It uses a SegFormer deep
 learning model trained on the [MARIDA](https://github.com/marine-debris/marine-debris.github.io)
-dataset for segmentation, combined with spectral analysis, Lagrangian particle tracking, and
+dataset for segmentation, combined with XGBoost spectral analysis, Lagrangian particle tracking, and
 multi-source geospatial attribution.
 
 ---
@@ -22,9 +22,9 @@ multi-source geospatial attribution.
 │  │ Stage 1  │───▶│ Stage 2  │───▶│ Stage 3  │───▶│ Stage 4  │      │
 │  │ Ingest   │    │Preprocess│    │ Detect   │    │ Polymer  │      │
 │  │          │    │          │    │          │    │ Classify │      │
-│  │ Sentinel │    │ Band     │    │ U-Net +  │    │ Spectral │      │
-│  │ 2 STAC   │    │ Reorder  │    │ TTA      │    │ Indices  │      │
-│  │ Download │    │ Normalize│    │ Cluster  │    │ Rules    │      │
+│  │ Sentinel │    │ Band     │    │ SegFormer│    │ XGBoost  │      │
+│  │ 2 STAC   │    │ Reorder  │    │ + TTA    │    │ ML Model │      │
+│  │ Download │    │ Offset   │    │ Cluster  │    │          │      │
 │  └──────────┘    │ Tile     │    └──────────┘    └─────┬────┘      │
 │                  └──────────┘                          │            │
 │                                                        ▼            │
@@ -63,7 +63,7 @@ python pipeline/run_pipeline.py \
     --start_date "2024-01-10" \
     --end_date "2024-01-15" \
     --output_dir "data/runs/test_run" \
-    --model_path "models/runs/marida_v1/best_model.pth" \
+    --model_path "ml_training_2.0/SegFormer/training-log/run_1/best_model.pth" \
     --cloud_cover 20 \
     --backtrack_days 7
 
@@ -110,7 +110,7 @@ python pipeline/run_pipeline.py \
     --start_date "2024-01-01" \
     --end_date "2024-01-31" \
     --output_dir "data/runs/sri_lanka_jan24" \
-    --model_path "models/runs/marida_v1/best_model.pth" \
+    --model_path "ml_training_2.0/SegFormer/training-log/run_1/best_model.pth" \
     --cloud_cover 20 \
     --backtrack_days 30
 
@@ -130,7 +130,7 @@ Each stage can also be run independently:
 python -m pipeline.03_detect \
     --scene_id S2A_MSIL2A_20240115 \
     --patches_dir data/processed/S2A_MSIL2A_20240115/patches \
-    --model_path models/runs/marida_v1/best_model.pth
+    --model_path ml_training_2.0/SegFormer/training-log/run_1/best_model.pth
 ```
 
 ---
@@ -158,13 +158,15 @@ python -m pipeline.03_detect \
 ```
 Plastic-Ledger/
 ├── models/
+│   ├── polymer/
+│   │   └── polymer_xgb_model.json      ← Trained XGBoost model
 │   └── runs/marida_v1/
-│       └── best_model.pth              ← Trained U-Net (do not modify)
+│       └── best_model.pth              ← Legacy U-Net checkpoint
 ├── pipeline/
 │   ├── 01_ingest.py                    ← Sentinel-2 STAC search & download
-│   ├── 02_preprocess.py                ← Band reorder, normalize, tile
-│   ├── 03_detect.py                    ← U-Net inference + TTA + clustering
-│   ├── 04_polymer.py                   ← Spectral index polymer classification
+│   ├── 02_preprocess.py                ← Band reorder, offset correct, tile
+│   ├── 03_detect.py                    ← SegFormer inference + TTA + clustering
+│   ├── 04_polymer.py                   ← XGBoost polymer classification
 │   ├── 05_backtrack.py                 ← Lagrangian RK4 particle tracking
 │   ├── 06_attribute.py                 ← Multi-source attribution scoring
 │   ├── 07_report.py                    ← PDF + GeoJSON + CSV + terminal output
@@ -187,9 +189,9 @@ Plastic-Ledger/
 
 ## ⚠️ Known Limitations
 
-1. **Model accuracy**: The MARIDA-trained U-Net has a debris IoU of ~0.03 on the test set.
-   This is typical for rare-class marine debris detection — the model is more useful as a
-   screening tool than a precision detector.
+1. **Model accuracy**: The MARIDA-trained SegFormer acts as a highly sensitive detector (with logit boosting),
+   while the Stage 4 XGBoost acts as a rigorous spectral filter. The pipeline is designed to be a
+   screening tool rather than a perfect precision detector due to the sparse nature of debris.
 
 2. **Band coverage**: Only 8 of 11 Sentinel-2 bands are downloaded (B01, B06, B07 are
    zero-padded). This may affect polymer classification accuracy for those indices that

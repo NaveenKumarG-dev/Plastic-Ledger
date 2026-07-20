@@ -6,7 +6,7 @@
 
 ## Overview
 
-Stage 3 is the core machine-learning inference stage. It loads a trained **U-Net segmentation model** and runs it over every preprocessed 256×256 patch from Stage 2. Predictions from all patches are stitched back into a full-scene probability map, then thresholded and clustered into **georeferenced debris detection objects** exported as GeoJSON.
+Stage 3 is the core machine-learning inference stage. It loads a trained **SegFormer (B2) segmentation model** and runs it over every preprocessed 256×256 patch from Stage 2. Predictions from all patches are stitched back into a full-scene probability map, then thresholded and clustered into **georeferenced debris detection objects** exported as GeoJSON.
 
 ---
 
@@ -38,12 +38,11 @@ data/detections/<SCENE_ID>/
 
 ## Model Architecture
 
-### U-Net with ResNet-34 Encoder
+### SegFormer (B2)
 
 ```
-Architecture: segmentation_models_pytorch.Unet
-  encoder_name:    resnet34
-  encoder_weights: None  (loaded from checkpoint)
+Architecture: HuggingFace SegformerForSemanticSegmentation
+  encoder:         nvidia/mit-b2
   in_channels:     11    (11-band Sentinel-2 input)
   classes:         15    (15 marine surface classes)
   activation:      None  (raw logits, softmax applied in inference)
@@ -54,7 +53,7 @@ Architecture: segmentation_models_pytorch.Unet
 ```python
 {
   "model_state": OrderedDict(...),   # PyTorch state dict
-  "encoder":     "resnet34",         # Encoder name
+  "encoder":     "segformer_b2",     # Encoder name
   "num_bands":   11,
   "num_classes": 15,
   "epoch":       <int>,              # Training epoch
@@ -137,18 +136,22 @@ Where `rs`, `cs` are the patch's `row_start`, `col_start` pixel offsets (from `p
 
 ## Debris Masking
 
-Two conditions must both be true for a pixel to be flagged as debris:
+To maximize recall for extremely sparse marine debris, a **logit boost** is applied to the debris class before softmax. Then, two conditions must both be true for a pixel to be flagged as debris:
 
 ```python
-debris_prob  = full_probs[0]          # class-0 probability
-class_mask   = full_probs.argmax(0)   # predicted class per pixel
+logits[:, 0, :, :] += debris_logit_boost  # Boost class 0 (Marine Debris)
+probs = F.softmax(logits, dim=1)
+
+debris_prob  = probs[0]               # class-0 probability
+class_mask   = probs.argmax(0)        # predicted class per pixel
 
 debris_mask = (debris_prob > threshold) & (class_mask == 0)
 ```
 
 | Parameter | Default (config) | Description |
 |-----------|-----------------|-------------|
-| `debris_threshold` | `0.1` | Minimum debris class probability |
+| `debris_threshold` | `0.10` | Minimum debris class probability |
+| `debris_logit_boost` | `0.5` | Additive boost to raw logits for Marine Debris |
 
 The dual condition prevents high-probability pixels that are *not* the argmax class (i.e., another class is more likely) from being flagged.
 
@@ -212,7 +215,7 @@ Each feature in `detections.geojson`:
 ## Processing Steps
 
 ```
-1. Load model checkpoint → U-Net (ResNet-34 encoder) → eval mode
+1. Load model checkpoint → SegFormer (B2) → eval mode
        ↓
 2. Load patch_index.json and scene_meta.json
        ↓
@@ -273,8 +276,9 @@ python -m pipeline.03_detect \
 
 ```yaml
 model:
-  debris_threshold: 0.1   # Minimum probability to flag a pixel as debris
-  tta: true               # Enable Test-Time Augmentation
+  debris_threshold: 0.10    # Minimum probability to flag a pixel as debris
+  debris_logit_boost: 0.5   # Logit boost for Marine Debris channel
+  tta: true                 # Enable Test-Time Augmentation
 
 detection:
   min_cluster_area_m2: 100  # Filter tiny clusters (< 4 pixels at 10 m)

@@ -9,7 +9,7 @@
 Stage 2 transforms raw Sentinel-2 per-band GeoTIFFs (from Stage 1) into **model-ready 256×256 overlapping patches**. The process includes:
 
 1. Loading and reordering 8 available bands into the 11-band model input format (zero-padding missing bands)
-2. Z-score normalization using MARIDA dataset statistics
+2. Applying Copernicus Collection 1 baseline corrections (subtracting the +1000 DN offset) and scaling to raw reflectance [0, 1]
 3. Tiling the full scene into overlapping patches
 4. Saving patches as `.npy` / `.npz` files with a geo-index
 
@@ -71,47 +71,23 @@ mapping = {0: 1, 1: 2, 2: 3, 3: 4, 4: 7, 5: 8, 6: 9, 7: 10}
 
 ---
 
-## Normalization Formula
-
-### Step 1 — Clip raw reflectance
+## Reflectance Scaling & Normalization
+    
+### Step 1 — Copernicus Collection 1 Offset Correction
+Sentinel-2 Collection 1 data includes a baseline offset of +1000 DN to allow for negative surface reflectance values.
 ```
-pixel_value = clip(pixel_value, 0.0001, 0.5)
+reflectance = (pixel_value - 1000) / 10000.0
 ```
-This prevents extreme outliers (sensor saturation, deep shadows).
+This aligns the current Sentinel-2 imagery with the historical data distribution of the MARIDA training dataset.
 
-### Step 2 — Z-score per band
-```
-normalized[b] = (raw[b] - mean[b]) / (std[b] + 1e-6)
-```
-
-**Per-band MARIDA statistics (11 bands):**
-
-| Position | Band | Mean | Std |
-|----------|------|------|-----|
-| 0 | B01 | 0.057 | 0.010 |
-| 1 | B02 | 0.054 | 0.010 |
-| 2 | B03 | 0.046 | 0.013 |
-| 3 | B04 | 0.036 | 0.010 |
-| 4 | B05 | 0.033 | 0.012 |
-| 5 | B06 | 0.041 | 0.020 |
-| 6 | B07 | 0.049 | 0.030 |
-| 7 | B08 | 0.043 | 0.020 |
-| 8 | B8A | 0.050 | 0.030 |
-| 9 | B11 | 0.031 | 0.020 |
-| 10 | B12 | 0.019 | 0.013 |
-
-### Step 3 — Safety clip
-```
-normalized = clip(normalized, -5.0, 5.0)
-```
-Handles any remaining NaN/Inf → set to 0.
-
-### Step 4 — Nodata masking
-Pixels where **all bands sum to zero** are marked as nodata and reset to 0 after normalization:
+### Step 2 — Nodata masking
+Pixels where **all bands sum to zero** are marked as nodata and reset to 0:
 ```python
 nodata_mask = (image.sum(axis=0) == 0)
 image[:, nodata_mask] = 0.0
 ```
+
+*Note: Z-score normalization was previously applied at this stage, but has been removed. The patches are now stored purely as raw reflectance values in the [0, 1] range to preserve true spectral signatures for the polymer classification stage.*
 
 ---
 
@@ -196,21 +172,23 @@ If `patch_index.json` already exists in the output directory, the entire stage i
 ```
 1. Load per-band TIF files from scene_dir
        ↓
-2. Resample any 20 m bands to match 10 m reference grid
+2. Identify highest resolution bands (10m) and assemble a reference grid
        ↓
-3. Assemble 8-band array → pad to 11-band model order
+3. Upsample 20m bands to match the 10m reference grid
        ↓
-4. Detect nodata pixels (all-band sum == 0)
+4. Assemble 8-band array → pad to 11-band model order
        ↓
-5. Clip [0.0001, 0.5] → Z-score normalize → clip [-5, 5]
+5. Subtract 1000 DN offset and scale to raw reflectance [0, 1]
        ↓
-6. Save nodata_mask.npy
+6. Detect nodata pixels (all-band sum == 0)
        ↓
-7. Tile into 256×256 patches with 32-pixel overlap
+7. Save nodata_mask.npy
        ↓
-8. Save each patch as patch_NNNN.npz (or .npy)
+8. Tile into 256×256 patches with 32-pixel overlap
        ↓
-9. Write patch_index.json and scene_meta.json
+9. Save each patch as patch_NNNN.npz (or .npy)
+       ↓
+10. Write patch_index.json and scene_meta.json
 ```
 
 ---
