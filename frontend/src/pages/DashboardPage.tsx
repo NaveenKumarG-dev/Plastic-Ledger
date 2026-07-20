@@ -2,11 +2,9 @@ import React, { useState, useCallback } from 'react';
 import Navbar from '@/components/Navbar';
 import { ProfessionalGISMap } from '@/components/gis/ProfessionalGISMap';
 import { FloatingGISToolbar } from '@/components/gis/FloatingGISToolbar';
-import { RegionInfoCard } from '@/components/gis/RegionInfoCard';
+import { GISPanelDrawer } from '@/components/gis/GISPanelDrawer';
 import { AIProcessingModal } from '@/components/dashboard/AIProcessingModal';
 import { ClusterDetailPanel } from '@/components/gis/ClusterDetailPanel';
-import { AISummaryPanel } from '@/components/dashboard/AISummaryPanel';
-import { TopStatsHeader } from '@/components/dashboard/TopStatsHeader';
 import { TimelineSlider } from '@/components/dashboard/TimelineSlider';
 import { mockApiService, RegionCalculationResult } from '@/services/apiService';
 import { SelectedRegion, PlasticCluster, EnvironmentalReport } from '@/types';
@@ -99,46 +97,24 @@ const DashboardPage: React.FC = () => {
           driftDays={driftDays}
         />
 
-        {/* Floating Left GIS Toolbar (Always accessible to select regions) */}
+        {/* Floating Left GIS Toolbar */}
         <FloatingGISToolbar onReset={handleResetSelection} />
 
-        {/* Top-Right Mini Stats & Layer Control (Only visible AFTER region is selected) */}
-        {currentRegion && (
-          <TopStatsHeader
-            clusterCount={clusters.length || 47}
-            accuracy={96}
-            processingTime={3.2}
-            highRiskCount={clusters.filter((c) => c.riskLevel === 'high' || c.riskLevel === 'critical').length || 12}
-            estimatedWaste={
-              clusters.length > 0
-                ? Number(clusters.reduce((acc, c) => acc + c.estimatedQuantity, 0).toFixed(2))
-                : 2.4
-            }
-          />
-        )}
+        {/* Top-Right Hamburger Symbol Slide-Over GIS Drawer (Region info, metrics, layers) */}
+        <GISPanelDrawer
+          region={currentRegion}
+          stats={currentStats}
+          clusters={clusters}
+          summary={summary}
+          onAnalyze={handleStartAnalysis}
+          isAnalyzing={isAnalyzing}
+        />
 
-        {/* Selected Region Info Card (Only visible AFTER region is selected) */}
-        {currentRegion && (
-          <RegionInfoCard
-            region={currentRegion}
-            stats={currentStats}
-            onAnalyze={handleStartAnalysis}
-            isAnalyzing={isAnalyzing}
-          />
-        )}
-
-        {/* Clickable Cluster Inspection Detail Panel (Right Side) */}
+        {/* Clickable Cluster Inspection Detail Panel */}
         <ClusterDetailPanel
           cluster={selectedCluster}
           onClose={() => setSelectedCluster(null)}
         />
-
-        {/* AI Summary Panel (Right Side, when no cluster selected) */}
-        {summary && !selectedCluster && (
-          <div className="absolute right-6 top-32 z-[990] w-88">
-            <AISummaryPanel summary={summary} />
-          </div>
-        )}
 
         {/* Bottom Interactive Timeline Slider (Only visible AFTER region is selected) */}
         {currentRegion && (
