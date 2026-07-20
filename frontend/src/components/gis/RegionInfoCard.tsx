@@ -25,7 +25,7 @@ export const RegionInfoCard: React.FC<RegionInfoCardProps> = ({
         initial={{ opacity: 0, x: -20, scale: 0.95 }}
         animate={{ opacity: 1, x: 0, scale: 1 }}
         exit={{ opacity: 0, x: -20, scale: 0.95 }}
-        className="absolute left-20 top-20 z-[990] w-88 max-h-[calc(100vh-180px)] overflow-y-auto bg-[#07172A]/95 border border-[#0A84FF]/40 backdrop-blur-2xl p-4 rounded-2xl shadow-2xl text-white font-sans scrollbar-thin scrollbar-thumb-white/10"
+        className="absolute left-[108px] top-20 z-[990] w-88 max-h-[calc(100vh-180px)] overflow-y-auto bg-[#07172A]/95 border border-[#0A84FF]/40 backdrop-blur-2xl p-4 rounded-2xl shadow-2xl text-white font-sans scrollbar-thin scrollbar-thumb-white/10"
       >
         {/* Glow Header Accent */}
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#0A84FF] via-cyan-400 to-[#00F5D4]" />
