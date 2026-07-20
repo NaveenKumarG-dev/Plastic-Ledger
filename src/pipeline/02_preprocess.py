@@ -34,10 +34,8 @@ logger = get_logger(__name__)
 # [B01, B02, B03, B04, B05, B06, B07, B08, B8A, B11, B12]
 MODEL_BAND_ORDER = ["B01", "B02", "B03", "B04", "B05", "B06", "B07",
                     "B08", "B8A", "B11", "B12"]
-# Bands we actually download (8 of 11)
-AVAILABLE_BANDS = ["B02", "B03", "B04", "B05", "B08", "B8A", "B11", "B12"]
-# Indices into MODEL_BAND_ORDER that need zero-padding (B01=0, B06=5, B07=6)
-PAD_INDICES = [0, 5, 6]
+# Bands we actually download (now all 11)
+AVAILABLE_BANDS = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B11", "B12"]
 
 NUM_BANDS = 11
 PATCH_SIZE = 256
@@ -115,8 +113,11 @@ def _load_multiband_tif(
         return data, profile, transform, crs
 
     if n_bands == 8:
-        # Need to pad to 11 bands
-        image = _pad_to_11_bands(data)
+        # Legacy 8-band fallback: pad to 11 bands
+        image = np.zeros((11, *data.shape[1:]), dtype=np.float32)
+        mapping = {0: 1, 1: 2, 2: 3, 3: 4, 4: 7, 5: 8, 6: 9, 7: 10}
+        for src_idx, dst_idx in mapping.items():
+            image[dst_idx] = data[src_idx]
         return image, profile, transform, crs
 
     # Try to use first NUM_BANDS bands or pad
@@ -162,8 +163,11 @@ def _load_individual_bands(
         for cand in candidates:
             if cand.exists():
                 with rasterio.open(cand) as src:
-                    band_data[band_name] = src.read(1).astype(np.float32)
-                    if ref_profile is None:
+                    arr = src.read(1).astype(np.float32)
+                    band_data[band_name] = arr
+                    
+                    # Track the highest resolution profile
+                    if ref_shape is None or (arr.shape[0] * arr.shape[1] > ref_shape[0] * ref_shape[1]):
                         ref_profile = src.profile.copy()
                         ref_shape = (src.height, src.width)
                 loaded = True
@@ -179,48 +183,22 @@ def _load_individual_bands(
     if ref_shape is None:
         raise FileNotFoundError("Could not determine reference shape")
 
-    # Assemble 8 available bands
+    # Assemble all available bands in correct order
     available_array = np.zeros((len(AVAILABLE_BANDS), *ref_shape), dtype=np.float32)
     for i, band_name in enumerate(AVAILABLE_BANDS):
         if band_name in band_data:
             arr = band_data[band_name]
-            # Resize if needed (some bands are 20m vs 10m)
+            # Resize if needed (upsample 60m/20m to 10m)
             if arr.shape != ref_shape:
                 from scipy.ndimage import zoom
                 zoom_factors = (ref_shape[0] / arr.shape[0], ref_shape[1] / arr.shape[1])
                 arr = zoom(arr, zoom_factors, order=1)
             available_array[i] = arr
 
-    image = _pad_to_11_bands(available_array)
-    return image, ref_profile, ref_profile["transform"], ref_profile.get("crs")
+    return available_array, ref_profile, ref_profile["transform"], ref_profile.get("crs")
 
 
-def _pad_to_11_bands(data_8: np.ndarray) -> np.ndarray:
-    """Pad an 8-band array to 11 bands matching model input order.
 
-    The 8 available bands map to positions [1,2,3,4,7,8,9,10] in the
-    11-band model input.  Positions 0 (B01), 5 (B06), and 6 (B07) are
-    zero-padded.
-
-    Args:
-        data_8: ``(8, H, W)`` float32 array.
-
-    Returns:
-        ``(11, H, W)`` float32 array.
-    """
-    _, h, w = data_8.shape
-    image = np.zeros((NUM_BANDS, h, w), dtype=np.float32)
-
-    # Map: available band index → model position
-    # Available: B02(0)→1, B03(1)→2, B04(2)→3, B05(3)→4,
-    #            B08(4)→7, B8A(5)→8, B11(6)→9, B12(7)→10
-    mapping = {0: 1, 1: 2, 2: 3, 3: 4, 4: 7, 5: 8, 6: 9, 7: 10}
-
-    for src_idx, dst_idx in mapping.items():
-        if src_idx < data_8.shape[0]:
-            image[dst_idx] = data_8[src_idx]
-
-    return image
 
 
 # ─────────────────────────────────────────────
@@ -249,24 +227,33 @@ def normalize_scene(
     # Detect nodata pixels (all-zero across bands)
     nodata_mask = (image.sum(axis=0) == 0)
 
+    # Sentinel-2 Collection 1 (Baseline >= 04.00) introduced a +1000 DN offset
+    # All historical data on Copernicus Data Space was reprocessed to include this.
+    # We must subtract 1000 to match the older MARIDA dataset distribution.
+    # Subtract 1000 only from valid (non-nodata) pixels to avoid making nodata negative.
+    image = np.where(~nodata_mask, image - 1000.0, 0.0)
+    
+    # Prevent negative reflectance values
+    image = np.clip(image, 0.0, None)
+
     # CRITICAL: Convert DN to reflectance (Sentinel-2 L2A is scaled by 10000)
     # This must match the SegFormer training preprocessing
     image = image / 10000.0
 
-    # Clip to MARIDA training range [0.0001, 0.5] for marine water scenes
-    # (marine water reflectance is typically 0.02-0.06, with some sand/cloud up to 0.5)
-    image = np.clip(image, 0.0001, 0.5)
+    # [REMOVED]: Do not clip to 0.5, as this destroys bright objects (clouds, plastic).
+    # image = np.clip(image, 0.0001, 0.5)
 
     # Z-score normalize per band using MARIDA training statistics
-    for b in range(NUM_BANDS):
-        image[b] = (image[b] - band_means[b]) / (band_stds[b] + 1e-6)
+    # [REMOVED]: The new SegFormer model was trained purely on reflectance values without Z-scoring.
+    # for b in range(NUM_BANDS):
+    #     image[b] = (image[b] - band_means[b]) / (band_stds[b] + 1e-6)
 
     # Reset nodata pixels to 0 after normalization
     image[:, nodata_mask] = 0.0
 
-    # Safety clip to prevent numerical issues [-5, 5] covers ~5-sigma range
-    image = np.clip(image, -5.0, 5.0)
-    image = np.nan_to_num(image, nan=0.0, posinf=5.0, neginf=-5.0)
+    # Safety clip to prevent numerical issues
+    image = np.clip(image, 0.0, 1.0)
+    image = np.nan_to_num(image, nan=0.0, posinf=1.0, neginf=0.0)
 
     return image, nodata_mask
 

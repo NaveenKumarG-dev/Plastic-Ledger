@@ -31,10 +31,11 @@ from pipeline.utils.cache_utils import load_config, stage_output_exists
 
 logger = get_logger(__name__)
 
-# ── RF Polymer Model ─────────────────────────────────────────────
-# Default location for the trained Random Forest model, label map,
-# and feature list produced by MARIDA_h5_dataset_signatures/train_polymer_model.py
+# ── Polymer Model (XGBoost / RF) ──────────────────────────────────────────
+# Default location for the trained models, label map,
+# and feature list produced by train_xgboost_polymer.py / train_polymer_model.py
 _DEFAULT_RF_MODEL_DIR = Path(r"d:\Plastic-Ledger\models\polymer")
+XGB_MODEL_PATH  = _DEFAULT_RF_MODEL_DIR / "polymer_xgb_model.json"
 RF_MODEL_PATH   = _DEFAULT_RF_MODEL_DIR / "polymer_rf_model.pkl"
 RF_LABEL_PATH   = _DEFAULT_RF_MODEL_DIR / "polymer_label_map.json"
 RF_FEATURE_PATH = _DEFAULT_RF_MODEL_DIR / "polymer_feature_names.json"
@@ -64,66 +65,63 @@ FALSE_POSITIVE_CLASSES = {
 }
 
 
-def load_rf_model():
-    """Load the trained Random Forest polymer classifier.
+def load_polymer_model():
+    """Load the trained XGBoost or Random Forest polymer classifier.
 
     Returns:
-        Tuple of (rf_model, label_id_to_class, feature_names) or
-        (None, None, None) if the model file cannot be found.
+        Tuple of (model, model_type, label_id_to_class, feature_names) or
+        (None, None, None, None) if no model file can be found.
     """
     try:
-        import joblib
-        if not RF_MODEL_PATH.exists():
-            logger.warning(
-                "RF polymer model not found at %s — falling back to rule-based classifier.",
-                RF_MODEL_PATH,
-            )
-            return None, None, None
-
-        rf = joblib.load(RF_MODEL_PATH)
-
         with open(RF_LABEL_PATH) as fh:
             label_map = json.load(fh)   # class_name → int_id
         id_to_class = {v: k for k, v in label_map.items()}
 
         with open(RF_FEATURE_PATH) as fh:
             feature_names = json.load(fh)   # ordered list of band names
+            
+        # Try XGBoost first
+        if XGB_MODEL_PATH.exists():
+            import xgboost as xgb
+            xgb_model = xgb.Booster()
+            xgb_model.load_model(XGB_MODEL_PATH)
+            logger.info("Loaded XGBoost polymer model: %d classes, %d features", len(label_map), len(feature_names))
+            return xgb_model, "xgb", id_to_class, feature_names
 
-        logger.info(
-            "Loaded RF polymer model: %d classes, %d features",
-            len(label_map), len(feature_names),
-        )
-        return rf, id_to_class, feature_names
+        # Fallback to Random Forest
+        if RF_MODEL_PATH.exists():
+            import joblib
+            rf = joblib.load(RF_MODEL_PATH)
+            logger.info("Loaded RF polymer model: %d classes, %d features", len(label_map), len(feature_names))
+            return rf, "rf", id_to_class, feature_names
 
-    except ImportError:
-        logger.warning("joblib not installed — falling back to rule-based classifier.")
-        return None, None, None
+        logger.warning("No polymer model found at %s — falling back to rule-based classifier.", _DEFAULT_RF_MODEL_DIR)
+        return None, None, None, None
+
     except Exception as exc:
-        logger.warning("Failed to load RF model (%s) — falling back.", exc)
-        return None, None, None
+        logger.warning("Failed to load polymer model (%s) — falling back to rules.", exc)
+        return None, None, None, None
 
 
-def classify_cluster_rf(
+def classify_cluster_ml(
     spectrum: np.ndarray,
-    rf_model,
+    model,
+    model_type: str,
     id_to_class: Dict[int, str],
     feature_names: List[str],
 ) -> Tuple[str, bool, float]:
-    """Classify a debris cluster using the Random Forest.
+    """Classify a debris cluster using the trained ML model.
 
     Args:
         spectrum: 11-element raw reflectance array (Stage 2 band order).
-        rf_model: Loaded Random Forest.
+        model: Loaded XGBoost or Random Forest.
+        model_type: "xgb" or "rf".
         id_to_class: Integer label → class name mapping.
         feature_names: Ordered list of MARIDA band names (e.g. 'nm440').
 
     Returns:
         Tuple of (polymer_type_str, is_false_positive, confidence_0_to_1).
     """
-    # MARIDA feature names mapped to Stage-2 band indices:
-    # nm440=B01≈idx0, nm490=B02≈idx1, nm560=B03≈idx2, nm665=B04≈idx3,
-    # nm705=B05≈idx4, nm740=B06≈idx5, nm783=B07≈idx6, nm842=B08≈idx7,
-    # nm865=B8A≈idx8, nm1600=B11≈idx9, nm2200=B12≈idx10
     MARIDA_TO_BAND_IDX = {
         "nm440": 0, "nm490": 1, "nm560": 2, "nm665": 3,
         "nm705": 4, "nm740": 5, "nm783": 6, "nm842": 7,
@@ -134,9 +132,24 @@ def classify_cluster_rf(
         dtype=np.float32,
     ).reshape(1, -1)
 
-    pred_id   = rf_model.predict(feat_vec)[0]
+    if model_type == "xgb":
+        import xgboost as xgb
+        dmat = xgb.DMatrix(feat_vec, feature_names=feature_names)
+        probs = model.predict(dmat)[0]  # returns class probabilities if objective is multi:softprob, else multi:softmax gives class
+        # Wait, if objective is multi:softmax, predict returns class directly.
+        # But we want confidence.
+        # Let's handle it safely.
+        if probs.ndim == 0 or probs.size == 1:
+            pred_id = int(probs)
+            proba = 1.0  # Cannot get proba easily if softmax
+        else:
+            pred_id = int(np.argmax(probs))
+            proba = float(probs[pred_id])
+    else:
+        pred_id   = model.predict(feat_vec)[0]
+        proba     = model.predict_proba(feat_vec)[0].max()
+
     class_name = id_to_class.get(pred_id, "Unclassified")
-    proba     = rf_model.predict_proba(feat_vec)[0].max()
     polymer   = MARIDA_CLASS_TO_POLYMER.get(class_name, class_name)
     is_fp     = class_name in FALSE_POSITIVE_CLASSES
     return polymer, is_fp, float(proba)
@@ -429,10 +442,9 @@ def run(
             count = np.maximum(count, 1.0)
             scene_data /= count[np.newaxis, :, :]
 
-            # --- Denormalize: patches store z-score values; spectral
-            # thresholds expect raw surface reflectance (0–1 scale).
-            # raw = normalized * std + mean  (per band)
-            # Nodata pixels were zeroed in Stage 2 and must remain 0.
+            # --- Denormalize: patches are NOW already raw surface reflectance (0-1 scale)
+            # because we removed Z-score normalization from Stage 2!
+            # We just need to ensure nodata pixels remain 0.
             nodata_mask_path = processed_dir / "nodata_mask.npy"
             if nodata_mask_path.exists():
                 nodata_mask_2d = np.load(nodata_mask_path)
@@ -441,9 +453,6 @@ def run(
                 (h, w), dtype=bool
             )
             for b_idx in range(scene_data.shape[0]):
-                scene_data[b_idx, valid] = (
-                    scene_data[b_idx, valid] * BAND_STDS[b_idx] + BAND_MEANS[b_idx]
-                )
                 scene_data[b_idx, ~valid] = 0.0
 
             # Zero-padded bands have no real signal — reset to 0 so that
@@ -475,10 +484,10 @@ def run(
     if scene_crs and gdf.crs and str(gdf.crs) != str(scene_crs):
         gdf_for_spectra = gdf.to_crs(scene_crs)
 
-    # ── Load RF model (once, shared across all clusters) ────────────────
-    rf_model, id_to_class, rf_feature_names = load_rf_model()
-    use_rf = rf_model is not None
-    logger.info("Polymer classifier: %s", "Random Forest" if use_rf else "rule-based fallback")
+    # ── Load ML model (once, shared across all clusters) ────────────────
+    ml_model, ml_type, id_to_class, ml_feature_names = load_polymer_model()
+    use_ml = ml_model is not None
+    logger.info("Polymer classifier: %s", f"ML ({ml_type})" if use_ml else "rule-based fallback")
 
     # Classify each cluster
     polymer_types = []
@@ -517,10 +526,10 @@ def run(
             spectrum = None
 
         if spectrum is not None:
-            if use_rf:
-                # ── Primary: Random Forest classifier ──────────────────────
-                polymer, is_fp, confidence = classify_cluster_rf(
-                    spectrum, rf_model, id_to_class, rf_feature_names,
+            if use_ml:
+                # ── Primary: ML classifier (XGBoost/RF) ──────────────────────
+                polymer, is_fp, confidence = classify_cluster_ml(
+                    spectrum, ml_model, ml_type, id_to_class, ml_feature_names,
                 )
                 # Also compute rule-based indices for transparency
                 indices = compute_spectral_indices(spectrum)

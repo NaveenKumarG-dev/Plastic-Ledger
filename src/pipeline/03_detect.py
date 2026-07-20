@@ -195,7 +195,26 @@ def load_model(
             arch = "segformer_b0"
 
     arch = str(arch).lower()
-    if arch in {"segformer", "segformer_b0"}:
+    if arch in {"segformer_b2"}:
+        model = SegformerForSemanticSegmentation.from_pretrained(
+            "nvidia/segformer-b2-finetuned-ade-512-512",
+            num_labels=NUM_CLASSES,
+            ignore_mismatched_sizes=True
+        )
+        old_conv = model.segformer.stages[0].patch_embeddings.proj
+        new_conv = nn.Conv2d(
+            in_channels=NUM_BANDS, 
+            out_channels=old_conv.out_channels, 
+            kernel_size=old_conv.kernel_size, 
+            stride=old_conv.stride, 
+            padding=old_conv.padding, 
+            bias=(old_conv.bias is not None)
+        )
+        model.segformer.stages[0].patch_embeddings.proj = new_conv
+        model.config.num_channels = NUM_BANDS
+        model.load_state_dict(state_dict, strict=False)
+
+    elif arch in {"segformer_b0"}:
         cfg = SegformerConfig(
             num_labels=NUM_CLASSES,
             num_channels=NUM_BANDS,
@@ -204,7 +223,6 @@ def load_model(
             decoder_hidden_size=256,
         )
         model = SegformerForSemanticSegmentation(cfg)
-
         old = model.segformer.encoder.patch_embeddings[0].proj
         new_conv = nn.Conv2d(
             NUM_BANDS,
@@ -213,7 +231,6 @@ def load_model(
             stride=old.stride,
             padding=old.padding,
         )
-        nn.init.kaiming_normal_(new_conv.weight)
         model.segformer.encoder.patch_embeddings[0].proj = new_conv
         model.load_state_dict(state_dict, strict=False)
 

@@ -37,7 +37,7 @@ logger = get_logger(__name__)
 # CONSTANTS
 # ─────────────────────────────────────────────
 STAC_ENDPOINT = "https://catalogue.dataspace.copernicus.eu/stac"
-REQUIRED_BANDS = ["B02", "B03", "B04", "B05", "B08", "B8A", "B11", "B12"]
+REQUIRED_BANDS = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B11", "B12"]
 COLLECTION = "sentinel-2-l2a"
 
 

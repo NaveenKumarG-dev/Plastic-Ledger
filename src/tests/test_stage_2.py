@@ -13,18 +13,6 @@ preprocess = importlib.import_module("pipeline.02_preprocess")
 class TestPadTo11Bands:
     """Tests for the 8→11 band padding logic."""
 
-    def test_correct_padding(self):
-        """8-band array should be padded to 11 bands with zeros at positions 0, 5, 6."""
-        data_8 = np.random.rand(8, 16, 16).astype(np.float32)
-        result = preprocess._pad_to_11_bands(data_8)
-
-        assert result.shape == (11, 16, 16)
-        np.testing.assert_array_equal(result[0], 0.0)
-        np.testing.assert_array_equal(result[5], 0.0)
-        np.testing.assert_array_equal(result[6], 0.0)
-        np.testing.assert_array_equal(result[1], data_8[0])
-        np.testing.assert_array_equal(result[7], data_8[4])
-
 
 class TestNormalize:
     """Tests for scene normalization."""
