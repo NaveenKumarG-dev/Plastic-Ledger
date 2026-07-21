@@ -18,6 +18,7 @@ Usage:
 import argparse
 import importlib
 import json
+import os
 import shutil
 import sys
 import time
@@ -39,6 +40,11 @@ if _env_file.exists():
     except ImportError:
         pass
 
+# CRITICAL: Prevent external PROJ conflicts (e.g. from pyproj vs rasterio vs global)
+# by ensuring neither PROJ_LIB nor PROJ_DATA is forcing a specific path globally.
+# This forces each library to fall back to its internal bundled binaries/data.
+os.environ.pop("PROJ_LIB", None)
+os.environ.pop("PROJ_DATA", None)
 from pipeline.utils.logging_utils import get_logger
 from pipeline.utils.cache_utils import load_config
 

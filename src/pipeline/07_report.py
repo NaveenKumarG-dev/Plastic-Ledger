@@ -179,8 +179,8 @@ def generate_pdf(
 
         # Table header
         pdf.set_font("Helvetica", "B", 8)
-        col_widths = [15, 25, 20, 40, 25, 30, 30]
-        headers = ["ID", "Area (sq m)", "Confidence", "Polymer", "Lat", "Lon", "Source"]
+        col_widths = [10, 18, 12, 28, 18, 18, 18, 18, 25]
+        headers = ["ID", "Area", "Conf", "Polymer", "Lat", "Lon", "Src Lat", "Src Lon", "Source"]
         for w, h in zip(col_widths, headers):
             pdf.cell(w, 7, h, border=1)
         pdf.ln()
@@ -197,13 +197,19 @@ def generate_pdf(
 
             # Find attribution for this cluster
             src = "N/A"
+            src_lat = "N/A"
+            src_lon = "N/A"
             if attribution_data:
                 for attr in attribution_data:
                     if attr.get("debris_cluster_id") == row.get("cluster_id"):
                         src = attr.get("source_type", "N/A")[:12]
+                        s_centroid = attr.get("source_centroid")
+                        if s_centroid and len(s_centroid) == 2:
+                            src_lon = f"{s_centroid[0]:.4f}"
+                            src_lat = f"{s_centroid[1]:.4f}"
                         break
 
-            vals = [cid, area, conf, polymer, lat, lon, src]
+            vals = [cid, area, conf, polymer, lat, lon, src_lat, src_lon, src]
             for w, v in zip(col_widths, vals):
                 pdf.cell(w, 6, v, border=1)
             pdf.ln()
@@ -371,9 +377,9 @@ def generate_csv(
         logger.info("Empty GeoDataFrame provided. Returning basic CSV with headers.")
         df = pd.DataFrame(columns=[
             "cluster_id", "lat", "lon", "area_sq_m", "polymer_type",
-            "confidence", "top_source_type", "top_source_location",
-            "top_source_country", "attribution_score", "detection_date",
-            "scene_id",
+            "confidence", "top_source_type", "source_lat", "source_lon",
+            "top_source_location", "top_source_country", "attribution_score", 
+            "detection_date", "scene_id",
         ])
         df.to_csv(output_path, index=False)
         return output_path
@@ -388,6 +394,7 @@ def generate_csv(
     for _, det in detections_gdf.iterrows():
         cid = det.get("cluster_id", 0)
         attr = attr_by_cluster.get(cid, {})
+        s_cent = attr.get("source_centroid", [None, None])
 
         rows.append({
             "cluster_id": cid,
@@ -397,6 +404,8 @@ def generate_csv(
             "polymer_type": det.get("polymer_type", ""),
             "confidence": det.get("mean_confidence", 0),
             "top_source_type": attr.get("source_type", ""),
+            "source_lat": s_cent[1] if s_cent and len(s_cent) == 2 else None,
+            "source_lon": s_cent[0] if s_cent and len(s_cent) == 2 else None,
             "top_source_location": attr.get("location_name", ""),
             "top_source_country": attr.get("country", ""),
             "attribution_score": attr.get("attribution_score", 0),
@@ -465,8 +474,8 @@ def print_terminal_summary(
                     f"{row.get('area_m2', 0):.0f}",
                     f"{row.get('mean_confidence', 0):.3f}",
                     str(row.get("polymer_type", "N/A")),
-                    f"({row.get('centroid_lon', 0):.3f}, "
-                    f"{row.get('centroid_lat', 0):.3f})",
+                    f"({row.get('centroid_lat', 0):.3f}, "
+                    f"{row.get('centroid_lon', 0):.3f})",
                 )
 
             console.print(table)
@@ -574,6 +583,28 @@ def run(
                 attribution_data = json.load(fh)
         except Exception as exc:
             logger.warning("Could not load attribution: %s", exc)
+
+    # Load backtrack summary to recover endpoints for unattributed clusters
+    backtrack_path = attribution_path.parent / "backtrack_summary.json"
+    if backtrack_path.exists():
+        try:
+            with open(backtrack_path) as fh:
+                backtrack_data = json.load(fh)
+            
+            # Augment attribution data with unattributed endpoints
+            attr_cids = {str(a.get("debris_cluster_id")) for a in attribution_data}
+            for bt in backtrack_data:
+                cid = str(bt.get("cluster_id"))
+                if cid not in attr_cids and "source_centroid" in bt:
+                    attribution_data.append({
+                        "debris_cluster_id": int(cid) if cid.isdigit() else cid,
+                        "source_centroid": bt["source_centroid"],
+                        "source_type": "N/A",
+                        "attribution_score": 0.0,
+                    })
+                    attr_cids.add(cid)
+        except Exception as exc:
+            logger.warning("Could not load backtrack summary: %s", exc)
 
     # Generate detection map
     detection_map = out_dir / "detection_map.png"

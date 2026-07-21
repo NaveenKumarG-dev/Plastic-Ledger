@@ -81,33 +81,6 @@ c.retrieve("reanalysis-era5-single-levels", {
 })
 ```
 
-### Fallback (Synthetic Currents)
-
-If either API is unavailable/unauthenticated, a seeded random velocity is generated:
-```python
-rng = np.random.default_rng(int(abs(lon * 1000 + lat * 1000)))
-u = rng.normal(0.02, 0.01)   # ~0.02 m/s eastward
-v = rng.normal(0.01, 0.01)   # ~0.01 m/s northward
-```
-
----
-
-## Combined Velocity Model
-
-The total velocity at any point combines ocean current and wind-driven drift (Stokes drift approximation):
-
-```
-u_total = w_ocean × u_ocean + w_wind × u_wind
-v_total = w_ocean × v_ocean + w_wind × v_wind
-```
-
-Default weights (from config):
-```
-w_ocean = 0.97   # 97% ocean current
-w_wind  = 0.03   # 3% wind-driven drift
-```
-
----
 
 ## OceanParcels Integration
 

@@ -29,7 +29,7 @@ import geopandas as gpd
 from shapely.geometry import LineString, Point, MultiPoint, box
 from sklearn.cluster import DBSCAN
 
-from parcels import FieldSet, ParticleSet, JITParticle, AdvectionRK4, Variable
+from parcels import FieldSet, ParticleSet, JITParticle, ScipyParticle, AdvectionRK4, Variable
 
 from pipeline.utils.logging_utils import get_logger
 from pipeline.utils.geo_utils import expand_bbox, retry_request
@@ -38,6 +38,8 @@ from pipeline.utils.cache_utils import load_config, stage_output_exists
 logger = get_logger(__name__)
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message=".*'where' used without 'out'.*")
+warnings.filterwarnings("ignore", message=".*no explicit representation of timezones available.*")
 
 # ─────────────────────────────────────────────
 # OCEAN CURRENT DATA
@@ -98,12 +100,10 @@ def download_ocean_currents(
         return out_path
 
     except ImportError:
-        logger.warning(
-            "copernicusmarine not installed — using synthetic currents"
-        )
+        logger.error("copernicusmarine not installed — CMEMS download failed")
         return None
     except Exception as exc:
-        logger.warning("CMEMS download failed: %s — using synthetic currents", exc)
+        logger.error("CMEMS download failed: %s", exc)
         return None
 
 
@@ -209,11 +209,11 @@ def download_wind_data(
         return out_path
 
     except ImportError:
-        logger.warning("cdsapi not installed — using synthetic wind data")
+        logger.error("cdsapi not installed — ERA5 download failed")
         return None
     except Exception as exc:
-        logger.warning(
-            "ERA5 download failed: %s — using synthetic wind\n"
+        logger.error(
+            "ERA5 download failed: %s\n"
             "  Tip: add CDS_API_KEY=<your-key> to your .env file "
             "(get a key at https://cds.climate.copernicus.eu/profile).\n"
             "  Optional: set CDS_RETRY_MAX, CDS_SLEEP_MAX, CDS_TIMEOUT to limit wait time.",
@@ -228,7 +228,7 @@ def download_wind_data(
 def load_parcels_fieldset(ocean_nc: Optional[Path], wind_nc: Optional[Path]) -> Optional[FieldSet]:
     """Load CMEMS and ERA5 NetCDF files into a combined OceanParcels FieldSet."""
     if not ocean_nc or not ocean_nc.exists() or not wind_nc or not wind_nc.exists():
-        logger.warning("Missing forcing data for OceanParcels. Using fallback logic.")
+        logger.error("Missing forcing data for OceanParcels.")
         return None
 
     try:
@@ -404,8 +404,12 @@ def run(
     # Load detections
     gdf = gpd.read_file(detections_path)
 
-    # Filter out false positives
-    if "is_false_positive" in gdf.columns:
+    # Filter out false positives and non-plastic
+    if "polymer_type" in gdf.columns:
+        # If classified, ONLY back-track actual plastic debris
+        gdf = gdf[gdf["polymer_type"] == "Marine Debris (Plastic)"].reset_index(drop=True)
+    elif "is_false_positive" in gdf.columns:
+        # Fallback if polymer_type isn't available
         gdf = gdf[gdf["is_false_positive"] != True].reset_index(drop=True)
 
     if len(gdf) == 0:
@@ -484,7 +488,7 @@ def run(
 
         pset = ParticleSet.from_list(
             fieldset=fieldset,
-            pclass=JITParticle,
+            pclass=ScipyParticle,
             lon=lons,
             lat=lats,
             time=times

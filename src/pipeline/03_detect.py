@@ -625,6 +625,15 @@ def run(
     out_dir = Path(output_dir) / scene_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Pre-flight environment check: ensure PROJ is functional before spending 15 mins on inference
+    try:
+        import pyproj
+        _test_transformer = pyproj.Transformer.from_crs("EPSG:32616", "EPSG:4326", always_xy=True)
+    except Exception as e:
+        logger.error("PROJ environment check failed! This means your spatial libraries are misconfigured.")
+        logger.error(f"Error details: {e}")
+        raise RuntimeError("PROJ environment check failed. See logs for details.") from e
+
     # Settings
     threshold = DEFAULT_THRESHOLD
     use_tta = True
